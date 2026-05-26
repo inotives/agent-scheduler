@@ -7,6 +7,7 @@ import typer
 
 from agent_scheduler import __version__
 from agent_scheduler.cli.config import app as config_app
+from agent_scheduler.cli.workflows import deploy_command, run_now_command, schedule_app
 
 
 app = typer.Typer(
@@ -15,6 +16,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(config_app, name="config")
+app.add_typer(schedule_app, name="schedule")
+app.command("deploy")(deploy_command)
+app.command("run-now")(run_now_command)
 
 
 @app.callback()
@@ -33,4 +37,3 @@ def main(
 def health() -> None:
     """Print a machine-readable health response."""
     typer.echo(json.dumps({"status": "ok"}))
-
