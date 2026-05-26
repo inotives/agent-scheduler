@@ -2,6 +2,7 @@
 .gitdir/
 .venv/
 .uv-cache/
+.prefect/
 __pycache__/
 *.py[cod]
 .pytest_cache/
