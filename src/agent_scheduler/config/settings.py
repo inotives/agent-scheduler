@@ -22,6 +22,11 @@ class AppSettings(BaseSettings):
     prefect_api_database_connection_url: str = Field(
         alias="PREFECT_API_DATABASE_CONNECTION_URL",
     )
+    agent_scheduler_global_concurrency: int = Field(
+        default=2,
+        ge=1,
+        alias="AGENT_SCHEDULER_GLOBAL_CONCURRENCY",
+    )
 
 
 def env_file_path(env: str, root: Path | None = None) -> Path:
@@ -33,4 +38,3 @@ def load_settings(env: str | None = None, root: Path | None = None) -> AppSettin
     selected_env = env or os.getenv("APP_ENV", "local")
     env_file = env_file_path(selected_env, root=root)
     return AppSettings(app_env=selected_env, _env_file=env_file if env_file.exists() else None)
-
