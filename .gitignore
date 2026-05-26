@@ -1,0 +1,19 @@
+.gitdir/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environment files
+.env.local
+.env.dev
+.env.prod
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

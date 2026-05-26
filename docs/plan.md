@@ -1,0 +1,235 @@
+# Agent Scheduler Plan
+
+## Summary
+
+Build a new `uv` Python 3.12 project named `agent-scheduler` that exposes an agent-friendly CLI for scheduling headless agent tasks through Prefect. The system uses registered, typed Python task definitions, Prefect backed by Postgres as the orchestration/state backend, and pluggable runner adapters for Codex headless, OpenCode headless, and future agent CLIs.
+
+Primary v1 use case: schedule a registered prompt-template workflow, such as running a skill from `<path_to_skill>` against an `<asset-list>` every day at `16:00:00`, using either OpenCode headless or Codex headless.
+
+## Phase 1: Project Scaffold
+
+Goal: create a clean, scalable Python project foundation.
+
+- Create a `uv` Python 3.12 project with `pyproject.toml`, package metadata, lockfile, and CLI entry point `agent-scheduler`.
+- Use a repo-local `.venv` created through `uv venv`; install and lock dependencies through `uv sync`.
+- Add base dependencies for Prefect, Pydantic, env loading, testing, and a CLI framework.
+- Add `.gitignore`, `.dockerignore`, and an environment template documenting required keys.
+- Gitignore real `.env.local`, `.env.dev`, and `.env.prod` files.
+- Add a `Makefile` as the canonical interface for setup, testing, local services, workers, and deployment commands.
+
+Acceptance:
+
+- `make setup` creates the local development environment.
+- `make test` runs an empty or smoke test suite successfully.
+- `agent-scheduler --help` runs through `uv`.
+
+## Phase 2: Folder Structure and Configuration
+
+Goal: establish boundaries that can scale across agent workflows, custom pipelines, and infrastructure.
+
+```text
+agent-scheduler/
+  src/agent_scheduler/
+    cli/              # Agent-facing CLI commands and JSON output contracts
+    config/           # Settings, env loading, Prefect/Postgres connection config
+    registry/         # Named agent workflow definitions and parameter models
+    runners/          # Pluggable headless agent runner adapters
+    flows/            # Prefect flows used by registered agent workflows
+    schedules/        # Schedule parsing, upsert, pause/resume, delete helpers
+    concurrency/      # Concurrency keys and run-overlap policy helpers
+    logging/          # Prefect log bridging and structured run output helpers
+  pipelines/          # Repository-owned custom Prefect pipeline scripts
+  tests/
+    unit/
+    integration/
+  infra/
+    docker/
+    prefect/
+  docs/
+  Makefile
+  Dockerfile
+  docker-compose.yml
+  pyproject.toml
+```
+
+- Implement typed settings for env-specific configuration.
+- Use `.env.local`, `.env.dev`, and `.env.prod` for credentials and deployment settings.
+- Require `PREFECT_API_DATABASE_CONNECTION_URL` for the self-hosted Prefect server.
+- Keep SQLite out of the project defaults.
+
+Acceptance:
+
+- Settings load from the selected env file.
+- Missing required settings produce JSON-friendly CLI errors.
+- The package imports cleanly from the `src/` layout.
+
+## Phase 3: Docker, Postgres, and Prefect Runtime
+
+Goal: run the orchestration stack locally in the same shape expected for deployment.
+
+- Add a `Dockerfile` for the scheduler/worker runtime image.
+- Add `docker-compose.yml` for Postgres, Prefect server, Prefect worker, and optional scheduler CLI/runtime container.
+- Configure Prefect to use Postgres via `PREFECT_API_DATABASE_CONNECTION_URL`.
+- Add Makefile targets for starting/stopping services, viewing logs, running migrations/setup, and starting a worker.
+- Ensure Docker builds do not depend on the local `.venv`; local dev still uses `uv`.
+
+Acceptance:
+
+- `make services-up` starts Postgres and Prefect server.
+- `make worker` starts a Prefect worker connected to the configured Prefect API.
+- Prefect persists state in Postgres, not SQLite.
+
+## Phase 4: Agent Workflow Registry
+
+Goal: define a safe, typed contract for agentic scheduled work.
+
+- Implement a Python registry of named workflows.
+- Each workflow declares:
+  - task name
+  - Pydantic parameter model
+  - allowed workspace
+  - allowed runner type
+  - retry, retry delay, timeout, and concurrency defaults
+  - prompt rendering logic
+- Keep the public CLI focused on agentic workflows only.
+- Do not expose arbitrary command execution through the CLI.
+- Allow repository-owned Python pipeline scripts in `pipelines/` to define custom Prefect flows outside the public agent CLI contract.
+
+Acceptance:
+
+- Unknown workflow names are rejected.
+- Invalid params are rejected before Prefect execution.
+- A registered workflow can render a deterministic prompt from typed params.
+
+## Phase 5: Runner Adapters
+
+Goal: invoke headless agents through a stable internal runner interface.
+
+- Define a runner context JSON contract containing task name, validated params, workspace, Prefect run metadata, schedule/run IDs, attempt info, and rendered prompt.
+- Implement runner adapters for:
+  - Codex headless
+  - OpenCode headless
+  - fake/test runner
+- Stream runner stdout/stderr into Prefect logs.
+- Treat exit code `0` as success, nonzero exit as failure, and timeout as failed/cancelled according to task policy.
+- Require workflows to write results to a predictable output path or emit a structured final JSON summary.
+
+Acceptance:
+
+- Fake runner can execute a workflow in tests without external agent CLIs.
+- Codex/OpenCode command construction is isolated to runner adapters.
+- Runner failures propagate to Prefect as failed runs.
+
+## Phase 6: Prefect Flow and Scheduling Lifecycle
+
+Goal: make registered workflows schedulable and manageable through Prefect.
+
+- Implement the Prefect flow that:
+  - loads the registered workflow
+  - validates parameters
+  - renders the final prompt
+  - invokes the selected runner
+  - records logs, status, retries, and result metadata
+- Support cron and one-shot schedule types.
+- Require explicit timezone for all schedule inputs.
+- Use upsert-by-name behavior for schedules to avoid duplicate automation.
+- Enforce default concurrency of one active run per task/workspace.
+- Make global concurrent agent runs configurable, with default `2`.
+
+Acceptance:
+
+- A workflow can be deployed to Prefect.
+- A cron schedule can be created or updated by name.
+- A one-shot run can be scheduled.
+- Overlapping runs for the same task/workspace are blocked or queued.
+
+## Phase 7: Agent-Facing CLI
+
+Goal: expose the minimum reliable interface agents need to operate the scheduler.
+
+- Default all command output to stable JSON.
+- Return nonzero exit codes on errors.
+- Implement lifecycle commands:
+  - deploy/register
+  - schedule create/update
+  - run now
+  - list
+  - inspect
+  - pause
+  - resume
+  - delete
+- Prefer Makefile targets over raw commands in documentation and operational workflows.
+
+Acceptance:
+
+- Agents can create/update a schedule using a JSON payload.
+- Agents can inspect, pause, resume, and delete schedules.
+- CLI errors are structured and machine-readable.
+
+## Phase 8: First Workable MVP
+
+Goal: prove the end-to-end daily skill execution use case.
+
+Implement the first registered workflow:
+
+```text
+Run skill in <path_to_skill> for the following assets: <asset-list>
+```
+
+Example schedule payload:
+
+```json
+{
+  "task": "run_skill_for_assets",
+  "schedule": {
+    "type": "cron",
+    "cron": "0 16 * * *",
+    "timezone": "Asia/Jakarta"
+  },
+  "params": {
+    "path_to_skill": "/path/to/skill",
+    "assets": ["asset-a", "asset-b"]
+  },
+  "runner": "codex"
+}
+```
+
+Execution sequence:
+
+```text
+Prefect schedule triggers
+  -> Prefect worker starts the flow
+  -> flow loads the registered workflow
+  -> flow validates parameters
+  -> flow renders the final prompt
+  -> flow invokes Codex/OpenCode headless
+  -> agent executes until success, failure, or timeout
+  -> Prefect records logs, status, retries, and result metadata
+```
+
+Acceptance:
+
+- `make services-up` starts Postgres and Prefect.
+- `make worker` starts the worker.
+- `agent-scheduler deploy` registers the workflow.
+- `agent-scheduler schedule ...` creates a daily 16:00 schedule with explicit timezone.
+- `agent-scheduler run-now ...` executes the workflow through the fake runner in tests and a real runner in local development when installed.
+- Prefect shows run history, logs, status, and failures.
+
+## Test Plan
+
+- Unit test registry validation, unknown workflow rejection, parameter validation, workspace resolution, and prompt rendering.
+- Unit test runner context construction and fake runner execution.
+- Unit test schedule parsing for cron and one-shot inputs, including required timezone failures.
+- Unit test JSON CLI output and error exit codes.
+- Integration test with fake runner and Prefect/Postgres local stack for deploy, schedule upsert, run-now, list, inspect, pause/resume, and delete.
+- Add a concurrency test proving overlapping runs for the same task/workspace are blocked or queued.
+
+## Assumptions
+
+- The first implementation is greenfield; the current repo only contains docs.
+- CodeGraph should not be initialized during the initial implementation unless requested later.
+- Local authorization is trusted: any local process that can run the CLI may schedule registered workflows.
+- No separate application database, API server, or web UI is included in v1.
+- Prefect Cloud is out of scope for v1; self-hosted Prefect with Postgres is the expected deployment.
+- Data/pipeline dependencies such as `pandas` or `polars` are added only when custom pipeline scripts require them; they are not base scheduler dependencies.
