@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from agent_scheduler import __version__
+from agent_scheduler.cli.config import app as config_app
 
 
 app = typer.Typer(
@@ -13,6 +14,7 @@ app = typer.Typer(
     help="Schedule headless agent workflows through Prefect.",
     no_args_is_help=True,
 )
+app.add_typer(config_app, name="config")
 
 
 @app.callback()
