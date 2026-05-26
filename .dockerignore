@@ -1,6 +1,5 @@
+.git/
 .gitdir/
-
-# Python
 .venv/
 .uv-cache/
 __pycache__/
@@ -8,13 +7,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-
-# Environment files
 .env.local
 .env.dev
 .env.prod
-
-# OS/editor
-.DS_Store
-.idea/
-.vscode/
