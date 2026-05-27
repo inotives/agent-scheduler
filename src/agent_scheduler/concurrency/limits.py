@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hashlib import sha256
+
 from prefect.client.schemas.objects import ConcurrencyLimitConfig, ConcurrencyLimitStrategy
 from prefect.client.orchestration import get_client
 
@@ -17,7 +19,8 @@ def deployment_concurrency_limit(rendered: RenderedWorkflow) -> ConcurrencyLimit
 
 def concurrency_key(rendered: RenderedWorkflow) -> str:
     workspace = str(rendered.workspace.resolve())
-    return f"{rendered.name}:{workspace}"
+    workspace_hash = sha256(workspace.encode("utf-8")).hexdigest()[:16]
+    return f"{rendered.name}:{workspace_hash}"
 
 
 def runtime_concurrency_keys(rendered: RenderedWorkflow) -> list[str]:

@@ -1,4 +1,10 @@
-from agent_scheduler.config.settings import env_file_path, load_settings
+import os
+
+from agent_scheduler.config.settings import (
+    apply_prefect_environment,
+    env_file_path,
+    load_settings,
+)
 
 
 def test_env_file_path_uses_selected_env(tmp_path) -> None:
@@ -6,6 +12,7 @@ def test_env_file_path_uses_selected_env(tmp_path) -> None:
 
 
 def test_load_settings_from_selected_env_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("PREFECT_API_URL", raising=False)
     monkeypatch.delenv("PREFECT_API_DATABASE_CONNECTION_URL", raising=False)
     env_file = tmp_path / ".env.dev"
     env_file.write_text(
@@ -27,3 +34,23 @@ def test_load_settings_from_selected_env_file(tmp_path, monkeypatch) -> None:
         == "postgresql+asyncpg://prefect:prefect@postgres:5432/prefect"
     )
 
+
+def test_apply_prefect_environment_sets_prefect_client_vars(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("PREFECT_API_URL", raising=False)
+    monkeypatch.delenv("PREFECT_API_DATABASE_CONNECTION_URL", raising=False)
+    env_file = tmp_path / ".env.local"
+    env_file.write_text(
+        "\n".join(
+            [
+                "APP_ENV=local",
+                "PREFECT_API_URL=http://127.0.0.1:4200/api",
+                "PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@postgres:5432/prefect",
+            ]
+        )
+    )
+    settings = load_settings(env="local", root=tmp_path)
+
+    apply_prefect_environment(settings)
+
+    assert os.environ["PREFECT_API_URL"] == "http://127.0.0.1:4200/api"
+    assert os.environ["PREFECT_API_DATABASE_CONNECTION_URL"].startswith("postgresql+asyncpg://")

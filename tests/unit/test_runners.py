@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent_scheduler.runners import (
+    ClaudeRunnerAdapter,
     CodexRunnerAdapter,
     FakeRunnerAdapter,
     OpenCodeRunnerAdapter,
@@ -80,7 +81,80 @@ def test_opencode_argv_uses_message_argument() -> None:
         prompt="Run a task",
     )
 
-    assert adapter.build_argv(context) == ["opencode", "run", "Run a task"]
+    assert adapter.build_argv(context) == [
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions",
+        "--print-logs",
+        "Run a task",
+    ]
+
+
+def test_claude_argv_uses_print_mode_message_argument() -> None:
+    adapter = ClaudeRunnerAdapter()
+    context = RunnerContext(
+        task_name="task",
+        params={},
+        workspace=Path.cwd(),
+        runner="claude",
+        prompt="Run a task",
+    )
+
+    assert adapter.build_argv(context) == [
+        "claude",
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "acceptEdits",
+        "Run a task",
+    ]
+
+
+def test_opencode_runner_closes_stdin(monkeypatch, tmp_path) -> None:
+    adapter = OpenCodeRunnerAdapter()
+    context = RunnerContext(
+        task_name="task",
+        params={},
+        workspace=tmp_path,
+        runner="opencode",
+        prompt="Run a task",
+    )
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter.run(context, timeout_seconds=30)
+
+    assert calls[0][1]["stdin"] == subprocess.DEVNULL
+    assert "input" not in calls[0][1]
+
+
+def test_claude_runner_closes_stdin(monkeypatch, tmp_path) -> None:
+    adapter = ClaudeRunnerAdapter()
+    context = RunnerContext(
+        task_name="task",
+        params={},
+        workspace=tmp_path,
+        runner="claude",
+        prompt="Run a task",
+    )
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter.run(context, timeout_seconds=30)
+
+    assert calls[0][1]["stdin"] == subprocess.DEVNULL
+    assert "input" not in calls[0][1]
 
 
 def test_subprocess_runner_sends_prompt_on_stdin(monkeypatch, tmp_path) -> None:
@@ -139,6 +213,7 @@ def test_subprocess_runner_maps_timeout(monkeypatch, tmp_path) -> None:
 
 
 def test_runner_factory_returns_known_adapters() -> None:
+    assert isinstance(runner_for("claude"), ClaudeRunnerAdapter)
     assert isinstance(runner_for("codex"), CodexRunnerAdapter)
     assert isinstance(runner_for("opencode"), OpenCodeRunnerAdapter)
 

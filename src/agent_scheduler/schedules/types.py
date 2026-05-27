@@ -4,7 +4,14 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from agent_scheduler.registry import RunnerType
 
@@ -56,7 +63,10 @@ class WorkflowDeploymentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    workflow_name: str = Field(min_length=1)
+    workflow_name: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("workflow_name", "task"),
+    )
     params: dict
     runner: RunnerType | None = None
     schedule: ScheduleSpec

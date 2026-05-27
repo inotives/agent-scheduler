@@ -12,7 +12,7 @@ from agent_scheduler.cli.json_output import (
     read_json_file,
     validation_details,
 )
-from agent_scheduler.config.settings import load_settings
+from agent_scheduler.config.settings import apply_prefect_environment, load_settings
 from agent_scheduler.schedules.types import WorkflowDeploymentSpec
 
 
@@ -23,7 +23,7 @@ def deploy_from_payload(payload_path: Path, env: str | None = None) -> None:
     try:
         payload = read_json_file(payload_path)
         spec = WorkflowDeploymentSpec.model_validate(payload)
-        settings = load_settings(env=env)
+        settings = _apply_runtime_env(env)
         deployment_id = _deploy_workflow(
             spec,
             global_concurrency_limit=settings.agent_scheduler_global_concurrency,
@@ -58,8 +58,10 @@ def schedule_update(
 def schedule_list(
     limit: Annotated[int, typer.Option("--limit", min=1, max=500)] = 100,
     offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     try:
+        _apply_runtime_env(env)
         deployments = _list_deployments(limit=limit, offset=offset)
     except Exception as exc:
         echo_error("list_failed", str(exc))
@@ -69,8 +71,10 @@ def schedule_list(
 @schedule_app.command("inspect")
 def schedule_inspect(
     ref: Annotated[str, typer.Argument(help="Deployment UUID or flow/deployment name.")],
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     try:
+        _apply_runtime_env(env)
         deployment = _inspect_deployment(ref)
     except Exception as exc:
         echo_error("inspect_failed", str(exc))
@@ -80,8 +84,10 @@ def schedule_inspect(
 @schedule_app.command("pause")
 def schedule_pause(
     ref: Annotated[str, typer.Argument(help="Deployment UUID or flow/deployment name.")],
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     try:
+        _apply_runtime_env(env)
         deployment = _pause_deployment(ref)
     except Exception as exc:
         echo_error("pause_failed", str(exc))
@@ -91,8 +97,10 @@ def schedule_pause(
 @schedule_app.command("resume")
 def schedule_resume(
     ref: Annotated[str, typer.Argument(help="Deployment UUID or flow/deployment name.")],
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     try:
+        _apply_runtime_env(env)
         deployment = _resume_deployment(ref)
     except Exception as exc:
         echo_error("resume_failed", str(exc))
@@ -102,8 +110,10 @@ def schedule_resume(
 @schedule_app.command("delete")
 def schedule_delete(
     ref: Annotated[str, typer.Argument(help="Deployment UUID or flow/deployment name.")],
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     try:
+        _apply_runtime_env(env)
         deployment = _delete_deployment(ref)
     except Exception as exc:
         echo_error("delete_failed", str(exc))
@@ -131,6 +141,7 @@ def run_now_command(
         bool,
         typer.Option("--fake", help="Use fake runner for direct payload execution."),
     ] = False,
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
 ) -> None:
     """Run a workflow now from a deployment or direct JSON payload."""
     if payload_path is None and deployment_ref is None:
@@ -140,6 +151,7 @@ def run_now_command(
 
     try:
         if deployment_ref is not None:
+            _apply_runtime_env(env)
             flow_run = _run_deployment_now(deployment_ref)
             echo_json({"ok": True, "flow_run": flow_run})
             return
@@ -167,6 +179,12 @@ def _execute_payload_now(payload: dict[str, Any], fake: bool) -> dict[str, Any]:
         adapter=adapter,
     )
     return result.model_dump()
+
+
+def _apply_runtime_env(env: str | None):
+    settings = load_settings(env=env)
+    apply_prefect_environment(settings)
+    return settings
 
 
 def _deploy_workflow(spec: WorkflowDeploymentSpec, global_concurrency_limit: int):

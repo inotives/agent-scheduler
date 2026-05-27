@@ -25,16 +25,22 @@ class SubprocessRunnerAdapter(RunnerAdapter):
         return context.prompt
 
     def run(self, context: RunnerContext, timeout_seconds: int) -> RunnerResult:
+        prompt_input = self.prompt_input(context)
+        stdin = subprocess.DEVNULL if prompt_input is None else None
         try:
-            completed = subprocess.run(
-                self.build_argv(context),
-                input=self.prompt_input(context),
-                text=True,
-                capture_output=True,
-                cwd=Path(context.workspace),
-                timeout=timeout_seconds,
-                check=False,
-            )
+            run_kwargs = {
+                "text": True,
+                "capture_output": True,
+                "cwd": Path(context.workspace),
+                "timeout": timeout_seconds,
+                "check": False,
+            }
+            if prompt_input is None:
+                run_kwargs["stdin"] = stdin
+            else:
+                run_kwargs["input"] = prompt_input
+
+            completed = subprocess.run(self.build_argv(context), **run_kwargs)
         except subprocess.TimeoutExpired as exc:
             return RunnerResult(
                 runner=self.runner,

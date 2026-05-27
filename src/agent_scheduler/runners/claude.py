@@ -4,12 +4,12 @@ from agent_scheduler.runners.subprocess import SubprocessRunnerAdapter
 from agent_scheduler.runners.types import RunnerContext
 
 
-class OpenCodeRunnerAdapter(SubprocessRunnerAdapter):
-    def __init__(self, executable: str = "opencode") -> None:
+class ClaudeRunnerAdapter(SubprocessRunnerAdapter):
+    def __init__(self, executable: str = "claude") -> None:
         super().__init__(
-            runner="opencode",
+            runner="claude",
             executable=executable,
-            args=("run", "--dangerously-skip-permissions", "--print-logs"),
+            args=("-p", "--output-format", "json", "--permission-mode", "acceptEdits"),
         )
 
     def build_argv(self, context: RunnerContext) -> list[str]:

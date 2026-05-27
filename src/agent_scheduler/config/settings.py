@@ -38,3 +38,10 @@ def load_settings(env: str | None = None, root: Path | None = None) -> AppSettin
     selected_env = env or os.getenv("APP_ENV", "local")
     env_file = env_file_path(selected_env, root=root)
     return AppSettings(app_env=selected_env, _env_file=env_file if env_file.exists() else None)
+
+
+def apply_prefect_environment(settings: AppSettings) -> None:
+    os.environ["PREFECT_API_URL"] = settings.prefect_api_url
+    os.environ["PREFECT_API_DATABASE_CONNECTION_URL"] = (
+        settings.prefect_api_database_connection_url
+    )

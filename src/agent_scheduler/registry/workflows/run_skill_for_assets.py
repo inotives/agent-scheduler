@@ -35,8 +35,8 @@ class RunSkillForAssetsWorkflow(RegisteredWorkflow):
     name = "run_skill_for_assets"
     params_model = RunSkillForAssetsParams
     allowed_workspace = Path.cwd()
-    allowed_runners = ("codex", "opencode")
-    default_runner = "codex"
+    allowed_runners = ("claude", "codex", "opencode")
+    default_runner = "opencode"
     policy = WorkflowPolicy(
         retries=0,
         retry_delay_seconds=60,

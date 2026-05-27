@@ -64,6 +64,36 @@ services:
     volumes:
       - prefect-home:/app/.prefect
 
+  prefect-worker-opencode:
+    build:
+      context: .
+    environment:
+      PREFECT_HOME: /app/.prefect
+      PREFECT_API_URL: ${PREFECT_WORKER_API_URL:-http://prefect-server:4200/api}
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    command:
+      [
+        "prefect",
+        "worker",
+        "start",
+        "--pool",
+        "${PREFECT_WORK_POOL:-agent-scheduler}",
+        "--type",
+        "process",
+        "--limit",
+        "${AGENT_SCHEDULER_WORKER_LIMIT:-2}",
+        "--name",
+        "${OPENCODE_WORKER_NAME:-agent-scheduler-opencode-worker}",
+        "--install-policy",
+        "never",
+      ]
+    depends_on:
+      - prefect-server
+    profiles:
+      - worker
+    volumes:
+      - prefect-home:/app/.prefect
+
   scheduler-cli:
     build:
       context: .
@@ -78,4 +108,3 @@ services:
 volumes:
   postgres-data:
   prefect-home:
-

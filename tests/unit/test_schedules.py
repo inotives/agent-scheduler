@@ -51,3 +51,16 @@ def test_deployment_spec_rejects_blank_name() -> None:
             params={"path_to_skill": "/skills/audit", "assets": ["GEMI"]},
             schedule={"type": "cron", "cron": "0 16 * * *", "timezone": "Asia/Jakarta"},
         )
+
+
+def test_deployment_spec_accepts_public_task_alias() -> None:
+    spec = WorkflowDeploymentSpec.model_validate(
+        {
+            "name": "daily-stock-market-close-summary",
+            "task": "run_skill_for_assets",
+            "params": {"path_to_skill": "/skills/audit", "assets": ["GEMI"]},
+            "schedule": {"type": "cron", "cron": "0 16 * * *", "timezone": "Asia/Jakarta"},
+        }
+    )
+
+    assert spec.workflow_name == "run_skill_for_assets"

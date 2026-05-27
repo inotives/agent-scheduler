@@ -15,7 +15,13 @@ __pycache__/
 .env.dev
 .env.prod
 
+# Generated workflow outputs
+outputs/*
+!outputs/.gitkeep
+
 # OS/editor
 .DS_Store
+.codegraph/
+.cursor/
 .idea/
 .vscode/

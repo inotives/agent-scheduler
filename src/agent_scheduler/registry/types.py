@@ -7,7 +7,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-RunnerType = Literal["codex", "opencode"]
+RunnerType = Literal["claude", "codex", "opencode"]
 
 
 class WorkflowPolicy(BaseModel):

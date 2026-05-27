@@ -13,7 +13,7 @@ from agent_scheduler.registry.workflows import RunSkillForAssetsWorkflow
 def test_default_registry_contains_run_skill_for_assets() -> None:
     registry = default_registry()
 
-    assert registry.names() == ["run_skill_for_assets"]
+    assert registry.names() == ["agent_smoke", "run_prompt", "run_skill_for_assets"]
 
 
 def test_unknown_workflow_is_rejected() -> None:
@@ -102,19 +102,111 @@ def test_registered_workflow_renders_deterministic_prompt() -> None:
     )
 
 
-def test_stock_market_close_summary_payload_for_gemi() -> None:
-    skill_path = (
-        "/home/inotives/.agent-knowledge/memory/3_intelligences/skills/trading/"
-        "stock_market_close_summary"
+def test_registered_workflow_defaults_to_opencode() -> None:
+    rendered = default_registry().render(
+        "run_prompt",
+        {"prompt": "Say hello."},
     )
+
+    assert rendered.runner == "opencode"
+
+
+def test_run_prompt_allows_claude_runner() -> None:
+    rendered = default_registry().render(
+        "run_prompt",
+        {"prompt": "Say hello."},
+        runner="claude",
+    )
+
+    assert rendered.runner == "claude"
+    assert rendered.prompt == "Say hello."
+
+
+def test_run_prompt_renders_text_with_variables() -> None:
+    rendered = default_registry().render(
+        "run_prompt",
+        {
+            "prompt": "Run {skill_path} for {assets} on {market_close_date}.",
+            "variables": {
+                "skill_path": "/skills/market_close_summary",
+                "assets": ["GEMI", "PLTR"],
+                "market_close_date": "2026-05-26",
+            },
+        },
+    )
+
+    assert rendered.runner == "opencode"
+    assert rendered.prompt == (
+        "Run /skills/market_close_summary for GEMI, PLTR on 2026-05-26."
+    )
+
+
+def test_run_prompt_renders_completion_signal_path_variable() -> None:
+    rendered = default_registry().render(
+        "run_prompt",
+        {
+            "prompt": "Run report, then write signal to {completion_signal_path}.",
+            "completion_signal_path": "outputs/report.done.json",
+        },
+    )
+
+    assert rendered.prompt == "Run report, then write signal to outputs/report.done.json."
+
+
+def test_run_prompt_rejects_missing_variables() -> None:
+    registry = default_registry()
+
+    with pytest.raises(ValueError, match="missing prompt variable: market_close_date"):
+        registry.render(
+            "run_prompt",
+            {
+                "prompt": "Run summary for {assets} on {market_close_date}.",
+                "variables": {"assets": ["GEMI"]},
+            },
+        )
+
+
+def test_run_prompt_rejects_invalid_variable_names() -> None:
+    registry = default_registry()
+
+    with pytest.raises(ValidationError):
+        registry.render(
+            "run_prompt",
+            {
+                "prompt": "Run summary for {assets}.",
+                "variables": {"asset-list": ["GEMI"]},
+            },
+        )
+
+
+def test_stock_market_close_summary_payload_for_gemi_and_pltr() -> None:
+    skill_path = "examples/flows/market_close_summary"
 
     rendered = default_registry().render(
-        "run_skill_for_assets",
-        {"path_to_skill": skill_path, "assets": ["GEMI"]},
-        runner="codex",
+        "run_prompt",
+        {
+            "prompt": (
+                "Run skill in {skill_path} for the following assets: {assets}.\n\n"
+                "Market close date: {market_close_date}."
+            ),
+            "variables": {
+                "skill_path": skill_path,
+                "assets": ["GEMI", "PLTR"],
+                "assets_json": '["GEMI","PLTR"]',
+                "market_close_date": "2026-05-26",
+            },
+        },
     )
 
+    assert rendered.runner == "opencode"
     assert rendered.prompt == (
-        f"Run skill in {skill_path} for the following assets:\n"
-        "- GEMI"
+        f"Run skill in {skill_path} for the following assets: GEMI, PLTR.\n\n"
+        "Market close date: 2026-05-26."
     )
+
+
+def test_agent_smoke_defaults_to_opencode() -> None:
+    rendered = default_registry().render("agent_smoke", {"message": "Say hello and exit."})
+
+    assert rendered.runner == "opencode"
+    assert rendered.prompt == "Say hello and exit."

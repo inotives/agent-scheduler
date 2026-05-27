@@ -1,0 +1,13 @@
+{
+  "name": "opencode-smoke",
+  "task": "agent_smoke",
+  "schedule": {
+    "type": "cron",
+    "cron": "0 0 1 1 *",
+    "timezone": "Asia/Jakarta"
+  },
+  "params": {
+    "message": "Say hello and exit."
+  },
+  "work_pool_name": "agent-scheduler"
+}

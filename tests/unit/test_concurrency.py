@@ -18,6 +18,7 @@ def test_runtime_concurrency_keys_include_global_and_task_workspace() -> None:
         concurrency_key(rendered),
     ]
     assert rendered.name in runtime_concurrency_keys(rendered)[1]
+    assert "/" not in runtime_concurrency_keys(rendered)[1]
 
 
 def test_upsert_runtime_concurrency_limits(monkeypatch) -> None:

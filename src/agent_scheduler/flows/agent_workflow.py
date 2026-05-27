@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from prefect import flow, get_run_logger
@@ -26,6 +29,7 @@ def execute_registered_workflow(
     logger = _logger()
 
     logger.info("Starting agent workflow '%s' with runner '%s'", rendered.name, rendered.runner)
+    started_at = datetime.now(timezone.utc)
     with _concurrency_context(rendered):
         result = selected_adapter.run(context, timeout_seconds=rendered.policy.timeout_seconds)
     _log_runner_result(result)
@@ -35,6 +39,7 @@ def execute_registered_workflow(
             f"Agent workflow '{rendered.name}' failed with status {result.status} "
             f"and exit code {result.exit_code}"
         )
+    _verify_completion_signal(rendered, result, started_at)
     return result
 
 
@@ -105,6 +110,37 @@ def _log_runner_result(result: RunnerResult) -> None:
         result.status,
         result.exit_code,
     )
+
+
+def _verify_completion_signal(
+    rendered: RenderedWorkflow,
+    result: RunnerResult,
+    started_at: datetime,
+) -> None:
+    signal_path = getattr(rendered.params, "completion_signal_path", None)
+    if signal_path is None or result.runner == "fake":
+        return
+
+    path = Path(signal_path)
+    if not path.is_absolute():
+        path = rendered.workspace / path
+    if not path.exists():
+        raise RuntimeError(f"completion signal was not written: {path}")
+
+    modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    if modified_at < started_at - timedelta(seconds=2):
+        raise RuntimeError(f"completion signal is stale: {path}")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"completion signal is not valid JSON: {path}") from exc
+
+    status = str(payload.get("status", "")).lower()
+    if status not in {"completed", "succeeded", "success"}:
+        raise RuntimeError(f"completion signal status is not successful: {path}")
+
+    _logger().info("Completion signal verified at %s", path)
 
 
 def _logger() -> logging.Logger:
