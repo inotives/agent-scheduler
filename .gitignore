@@ -18,6 +18,7 @@ __pycache__/
 # Generated workflow outputs
 outputs/*
 !outputs/.gitkeep
+.logs/
 
 # OS/editor
 .DS_Store

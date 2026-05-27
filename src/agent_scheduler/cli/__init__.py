@@ -7,7 +7,12 @@ import typer
 
 from agent_scheduler import __version__
 from agent_scheduler.cli.config import app as config_app
-from agent_scheduler.cli.workflows import deploy_command, run_now_command, schedule_app
+from agent_scheduler.cli.workflows import (
+    backfill_app,
+    deploy_command,
+    run_now_command,
+    schedule_app,
+)
 
 
 app = typer.Typer(
@@ -17,6 +22,7 @@ app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 app.add_typer(schedule_app, name="schedule")
+app.add_typer(backfill_app, name="backfill")
 app.command("deploy")(deploy_command)
 app.command("run-now")(run_now_command)
 

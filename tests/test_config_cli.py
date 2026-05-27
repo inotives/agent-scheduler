@@ -29,6 +29,8 @@ def test_config_check_loads_selected_env_file(tmp_path, monkeypatch) -> None:
         "agent_scheduler_database_configured": True,
         "pipeline_database_configured": True,
         "trading_private_database_configured": True,
+        "coingecko_api_base_url": "https://api.coingecko.com/api/v3",
+        "coingecko_api_key_configured": False,
     }
 
 

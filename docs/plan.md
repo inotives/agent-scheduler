@@ -320,6 +320,79 @@ Implementation notes:
 - `make db-check-access` smoke-checks writes for `scheduler_app`, `public_data`, and `trading_private`.
 - Existing local Postgres volumes must be recreated intentionally before bootstrap scripts can create the new databases and schemas.
 
+## Phase 10: Example Public Dataset Pipeline
+
+Goal: prove the scheduler repo can also host deterministic custom pipelines without asking an agent prompt to invent schema or SQL at runtime.
+
+Example pipeline:
+
+```text
+CoinGecko /coins/list
+  -> fetch current coin ID map
+  -> validate id, symbol, name, platforms
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_coins
+  -> record run metadata in public_data.pipeline_ingest_runs
+
+CoinGecko /asset_platforms
+  -> fetch current asset platform ID map
+  -> validate id, chain_identifier, name, shortname, native_coin_id, image
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_asset_platforms
+  -> record run metadata in public_data.pipeline_ingest_runs
+
+CoinGecko /nfts/list
+  -> fetch paginated NFT collection ID map
+  -> validate id, contract_address, name, asset_platform_id, symbol
+  -> wait between paginated requests to avoid rate-limit pressure
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_nft_collections
+  -> record run metadata in public_data.pipeline_ingest_runs
+```
+
+Scalable structure:
+
+```text
+src/agent_scheduler/pipelines/
+  common/           # shared DB and pipeline infrastructure
+  coingecko/
+    client.py       # source API client
+    models.py       # validated API/result models
+    repository.py   # target schema and persistence
+    coins_list.py   # ingestion orchestration
+    asset_platforms.py
+    nfts_list.py
+
+pipelines/coingecko/
+  ingest_coins.py
+  ingest_asset_platforms.py
+  ingest_nfts.py
+  README.md
+```
+
+Implementation tasks:
+
+- Keep custom pipelines out of the agent-facing `agent-scheduler` CLI surface.
+- Add reproducible scripts under `pipelines/coingecko/`.
+- Use `PIPELINE_DATABASE_URL`, not Prefect's database and not `AGENT_SCHEDULER_DATABASE_URL`.
+- Keep writes inside the `public_data` schema for public external datasets.
+- Make schema creation idempotent.
+- Add dry-run mode for fetch and validation without DB writes.
+- Add Make targets for dry-run and real ingestion.
+- Add weekly Prefect schedules for both CoinGecko datasets at Sunday `10:00:00` in `Asia/Singapore`.
+- Document developer pipeline usage in README and `pipelines/coingecko/README.md`.
+
+Acceptance:
+
+- Dry-run can validate a CoinGecko response without database writes.
+- Real ingestion creates or updates `public_data.coingecko_coins`.
+- Real ingestion creates or updates `public_data.coingecko_asset_platforms`.
+- Real ingestion creates or updates `public_data.coingecko_nft_collections`.
+- Ingestion writes an audit record to `public_data.pipeline_ingest_runs`.
+- Prefect deployments exist for `weekly-coingecko-coins-list`, `weekly-coingecko-asset-platforms`, and `weekly-coingecko-nfts-list` on cron `0 10 * * 0`.
+- NFT ingestion uses an inter-page delay and supports `max_pages` for safe validation.
+- Tests cover API client request construction, schema target names, and dry-run validation.
+
 ## Test Plan
 
 - Unit test registry validation, unknown workflow rejection, parameter validation, workspace resolution, and prompt rendering.

@@ -39,6 +39,7 @@ Agent Scheduler uses Prefect for orchestration and Postgres-backed state while k
 | **Postgres-backed orchestration** | Prefect stores deployments, schedules, run parameters, logs, and state in Postgres. |
 | **Completion signals** | Workflows can require a small `.done.json` signal so Prefect can verify the agent finished. |
 | **Skill-owned artifacts** | The agent skill owns the actual report/output format and path, such as markdown reports. |
+| **Repo-owned pipelines** | Tested pipeline commands can ingest public datasets, starting with CoinGecko coin listings into `public_data`. |
 | **Concurrency controls** | Default global and per-workflow concurrency limits prevent uncontrolled overlapping agent runs. |
 | **Agent-safe CLI** | The CLI schedules registered workflows only; it does not expose arbitrary shell commands. |
 
@@ -106,7 +107,7 @@ After the insert succeeds, print a JSON summary with status and inserted row cou
 For repeatable production pipelines, prefer a repo-owned command or script with tested schema handling:
 
 ```text
-Run `agent-scheduler pipeline ingest-weather --location Singapore` and report whether it succeeded.
+Run `uv run python pipelines/weather/ingest_weather.py --location Singapore` and report whether it succeeded.
 ```
 
 That keeps schema creation, validation, migrations, and credentials inside code rather than relying on prompt-generated SQL.
@@ -223,6 +224,10 @@ PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@postgre
 AGENT_SCHEDULER_DATABASE_URL=postgresql+asyncpg://agent_scheduler_app:agent_scheduler@postgres:5432/agent_scheduler
 PIPELINE_DATABASE_URL=postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data
 TRADING_PRIVATE_DATABASE_URL=postgresql+asyncpg://trading_private_writer:trading_private@postgres:5432/pipeline_data
+COINGECKO_API_BASE_URL=https://api.coingecko.com/api/v3
+COINGECKO_API_KEY=
+COINGECKO_API_KEY_HEADER=x-cg-pro-api-key
+COINGECKO_REQUEST_TIMEOUT_SECONDS=30
 ```
 
 For Docker bootstrap, the local Postgres container should start with the admin database defaults, then the init script creates the app databases and users:
@@ -435,6 +440,40 @@ uv run agent-scheduler run-now \
   --deployment agent-scheduler-run-workflow/daily-stock-market-close-summary
 ```
 
+### Backfill Historical Runs
+
+Use `backfill run` to execute an existing payload once with temporary overrides. This does not modify the saved JSON file or the Prefect deployment schedule.
+
+Example: rerun the stock market close summary for a historical date and asset set:
+
+```bash
+agent-scheduler backfill run examples/stock_market_close_summary_daily.json \
+  --var market_close_date=2026-05-20 \
+  --asset GEMI \
+  --asset PLTR \
+  --set completion_signal_path=outputs/backfill-stock-market-close-summary-2026-05-20.done.json
+```
+
+Validate without invoking a real agent:
+
+```bash
+agent-scheduler backfill run examples/stock_market_close_summary_daily.json \
+  --fake \
+  --var market_close_date=2026-05-20 \
+  --asset GEMI \
+  --asset PLTR
+```
+
+Override options:
+
+| Option | Purpose |
+|---|---|
+| `--var key=value` | Override `params.variables[key]` for `run_prompt` payloads. May be repeated. |
+| `--asset SYMBOL` | Replace `params.variables.assets`; also updates `assets_json`. May be repeated. |
+| `--set key=value` | Override a top-level `params[key]`, such as `completion_signal_path`. May be repeated. |
+| `--runner opencode|claude|codex` | Override the payload runner for this run only. |
+| `--fake` | Render and validate without invoking a real runner. |
+
 ### List And Inspect Schedules
 
 ```bash
@@ -487,6 +526,65 @@ make worker-claude
 
 The Claude runner invokes Claude Code in headless print mode and expects `claude` to be available on `PATH`.
 
+### Custom Pipeline Examples
+
+Repo-owned pipelines are regular tested Python scripts, separate from the agent-facing scheduler CLI. Use them when schema creation, validation, upserts, or credentials should be deterministic.
+
+CoinGecko coin list dry run:
+
+```bash
+make pipeline-coingecko-coins-dry-run
+```
+
+Ingest active CoinGecko coins into `public_data.coingecko_coins`:
+
+```bash
+make pipeline-coingecko-coins-ingest
+```
+
+CoinGecko asset platforms dry run:
+
+```bash
+make pipeline-coingecko-asset-platforms-dry-run
+```
+
+Ingest CoinGecko asset platforms into `public_data.coingecko_asset_platforms`:
+
+```bash
+make pipeline-coingecko-asset-platforms-ingest
+```
+
+CoinGecko NFTs dry run:
+
+```bash
+make pipeline-coingecko-nfts-dry-run
+```
+
+The NFT dry-run fetches one page by default. Full NFT ingestion is paginated and uses `COINGECKO_PAGINATED_REQUEST_DELAY_SECONDS` between pages to avoid rate-limit pressure.
+
+Ingest CoinGecko NFT collections into `public_data.coingecko_nft_collections`:
+
+```bash
+make pipeline-coingecko-nfts-ingest
+```
+
+Deploy all CoinGecko pipelines as weekly Prefect schedules:
+
+```bash
+make pipeline-coingecko-deploy-schedules
+```
+
+All schedules run every Sunday at `10:00:00` in `Asia/Singapore`.
+
+These scripts use `PIPELINE_DATABASE_URL`, create `public_data` tables when needed, and write audit rows to `public_data.pipeline_ingest_runs`. Example-specific notes live in [pipelines/coingecko/README.md](pipelines/coingecko/README.md).
+
+When running scripts directly on the host against the local Docker Postgres port, use a host-reachable database URL:
+
+```bash
+PIPELINE_DATABASE_URL=postgresql+asyncpg://pipeline_app:pipeline_app@127.0.0.1:5432/pipeline_data \
+  uv run python pipelines/coingecko/ingest_coins.py --include-platform
+```
+
 ### Environment Selection
 
 Most CLI commands accept `--env`:
@@ -526,9 +624,22 @@ make services-down          # Stop local services
 make services-logs          # Tail service logs
 make db-bootstrap-existing  # Apply DB bootstrap to an existing local Postgres volume
 make db-check-access        # Smoke-check scheduler, public pipeline, and private trading DB access
+make pipeline-coingecko-coins-dry-run  # Validate CoinGecko coin list without DB writes
+make pipeline-coingecko-coins-ingest   # Ingest CoinGecko coin list into public_data
+make pipeline-coingecko-asset-platforms-dry-run  # Validate CoinGecko asset platforms without DB writes
+make pipeline-coingecko-asset-platforms-ingest   # Ingest CoinGecko asset platforms into public_data
+make pipeline-coingecko-nfts-dry-run             # Validate first NFT list page without DB writes
+make pipeline-coingecko-nfts-ingest              # Ingest paginated CoinGecko NFT collections
+make pipeline-coingecko-deploy-schedules         # Deploy weekly Sunday 10:00 CoinGecko schedules
 make worker-opencode        # Start host process worker for OpenCode
 make worker-claude          # Start host process worker for Claude
 make worker                 # Start generic host process worker
+make worker-background      # Start generic host worker in background and log to .logs/
+make worker-opencode-background  # Start OpenCode worker in background and log to .logs/
+make worker-claude-background    # Start Claude worker in background and log to .logs/
+make worker-stop           # Stop generic host worker started by worker-background
+make worker-opencode-stop  # Stop OpenCode worker started by worker-opencode-background
+make worker-claude-stop    # Stop Claude worker started by worker-claude-background
 make test-stock-market-close-summary            # Render and run stock close payload with fake runner
 make flow-stock-market-close-summary-deploy     # Deploy/update stock close Prefect deployment
 make flow-stock-market-close-summary-run        # Trigger stock close deployment immediately
@@ -569,6 +680,11 @@ Important settings:
 | `AGENT_SCHEDULER_DATABASE_URL` | Scheduler application metadata database URL. |
 | `PIPELINE_DATABASE_URL` | General pipeline/public dataset database URL. |
 | `TRADING_PRIVATE_DATABASE_URL` | Private trading dataset writer database URL. |
+| `COINGECKO_API_BASE_URL` | CoinGecko API base URL for the example public dataset pipeline. |
+| `COINGECKO_API_KEY` | Optional CoinGecko API key. Leave blank for plans/endpoints that do not require one. |
+| `COINGECKO_API_KEY_HEADER` | Header name for CoinGecko API key auth. Defaults to `x-cg-pro-api-key`. |
+| `COINGECKO_REQUEST_TIMEOUT_SECONDS` | CoinGecko request timeout. |
+| `COINGECKO_PAGINATED_REQUEST_DELAY_SECONDS` | Delay between paginated CoinGecko requests. Defaults to `6`. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Local Postgres bootstrap admin credentials. Defaults are `postgres/postgres/postgres`. |
 | `AGENT_SCHEDULER_GLOBAL_CONCURRENCY` | Global concurrent agent run limit. |
 | `OPENCODE_WORKER_NAME` | Name used by the OpenCode worker. |
@@ -603,7 +719,8 @@ src/agent_scheduler/
   flows/            # Prefect flow and deployment helpers
   schedules/        # Schedule payload types and lifecycle helpers
   concurrency/      # Runtime concurrency keys and limits
-pipelines/          # Repository-owned custom Prefect pipeline scripts
+  pipelines/        # Repo-owned pipeline clients, models, repositories, and ingestion functions
+pipelines/          # Pipeline examples, docs, and reproducibility notes
 examples/           # Example deployment payloads
 examples/flows/     # Repo-local example agent flows/skills
 docs/               # Plan and workflow docs
@@ -626,11 +743,11 @@ Implemented:
 - deployment and run-now CLI paths
 - stock market close summary payload
 - completion signal verification
+- backfill helper command
+- CoinGecko coin list pipeline into `public_data.coingecko_coins`
 
 Planned:
 
-- richer deployment parameter update commands
-- backfill helper commands
 - broader integration tests against the local Prefect/Postgres stack
 - additional runner adapters
 

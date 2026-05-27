@@ -8,6 +8,7 @@ def test_cli_help() -> None:
 
     assert result.exit_code == 0
     assert "Schedule headless agent workflows" in result.output
+    assert "pipeline" not in result.output
 
 
 def test_cli_health_json() -> None:
@@ -15,4 +16,3 @@ def test_cli_health_json() -> None:
 
     assert result.exit_code == 0
     assert result.output.strip() == '{"status": "ok"}'
-

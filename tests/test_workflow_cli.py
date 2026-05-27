@@ -84,6 +84,62 @@ def test_run_now_with_fake_runner_executes_payload(tmp_path) -> None:
     assert payload["result"]["status"] == "succeeded"
 
 
+def test_backfill_run_applies_prompt_variable_overrides(tmp_path) -> None:
+    payload = {
+        "name": "daily-stock-market-close-summary",
+        "task": "run_prompt",
+        "schedule": {"type": "cron", "cron": "0 16 * * *", "timezone": "Asia/Singapore"},
+        "params": {
+            "prompt": "Market close {market_close_date}: {assets}. Signal {completion_signal_path}.",
+            "variables": {
+                "assets": ["GEMI"],
+                "assets_json": ["GEMI"],
+                "market_close_date": "2026-05-26",
+            },
+            "completion_signal_path": "outputs/original.done.json",
+        },
+        "runner": "opencode",
+    }
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "backfill",
+            "run",
+            str(payload_path),
+            "--fake",
+            "--var",
+            "market_close_date=2026-05-20",
+            "--asset",
+            "PLTR",
+            "--asset",
+            "GEMI",
+            "--set",
+            "completion_signal_path=outputs/backfill-2026-05-20.done.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["ok"] is True
+    assert output["workflow_name"] == "run_prompt"
+    prompt = json.loads(output["result"]["stdout"])["prompt"]
+    assert "2026-05-20" in prompt
+    assert "PLTR, GEMI" in prompt
+    assert "outputs/backfill-2026-05-20.done.json" in prompt
+
+
+def test_backfill_run_rejects_invalid_override(tmp_path) -> None:
+    payload_path = write_payload(tmp_path)
+
+    result = runner.invoke(app, ["backfill", "run", str(payload_path), "--var", "bad"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error"]["code"] == "invalid_override"
+
+
 def test_run_now_from_deployment(monkeypatch) -> None:
     flow_run_id = uuid4()
 

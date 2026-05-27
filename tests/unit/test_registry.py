@@ -153,6 +153,19 @@ def test_run_prompt_renders_completion_signal_path_variable() -> None:
     assert rendered.prompt == "Run report, then write signal to outputs/report.done.json."
 
 
+def test_run_prompt_prefers_top_level_completion_signal_path() -> None:
+    rendered = default_registry().render(
+        "run_prompt",
+        {
+            "prompt": "Run report, then write signal to {completion_signal_path}.",
+            "variables": {"completion_signal_path": "outputs/old.done.json"},
+            "completion_signal_path": "outputs/new.done.json",
+        },
+    )
+
+    assert rendered.prompt == "Run report, then write signal to outputs/new.done.json."
+
+
 def test_run_prompt_rejects_missing_variables() -> None:
     registry = default_registry()
 

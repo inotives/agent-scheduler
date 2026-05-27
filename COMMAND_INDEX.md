@@ -239,6 +239,15 @@ Required database URLs:
 | `PIPELINE_DATABASE_URL` | General pipeline and public dataset database, `pipeline_app` and `public_data` schemas. |
 | `TRADING_PRIVATE_DATABASE_URL` | Private trading dataset writer, `trading_private` schema. |
 
+Optional public pipeline settings:
+
+| Variable | Purpose |
+|---|---|
+| `COINGECKO_API_BASE_URL` | CoinGecko API base URL. Defaults to `https://api.coingecko.com/api/v3`. |
+| `COINGECKO_API_KEY` | Optional CoinGecko API key. |
+| `COINGECKO_API_KEY_HEADER` | Header used for API key auth. Defaults to `x-cg-pro-api-key`. |
+| `COINGECKO_REQUEST_TIMEOUT_SECONDS` | Request timeout for CoinGecko API calls. |
+
 ### Validate Payload With Fake Runner
 
 ```bash
@@ -264,6 +273,39 @@ Requirements:
 
 - selected runner CLI installed locally
 - completion signal written if `completion_signal_path` is set
+
+### Backfill Historical Payload
+
+```bash
+uv run agent-scheduler backfill run examples/stock_market_close_summary_daily.json \
+  --var market_close_date=2026-05-20 \
+  --asset GEMI \
+  --asset PLTR \
+  --set completion_signal_path=outputs/backfill-stock-market-close-summary-2026-05-20.done.json
+```
+
+Purpose: execute a payload once with temporary overrides. This does not update the JSON file or the Prefect deployment.
+
+Validation mode:
+
+```bash
+uv run agent-scheduler backfill run examples/stock_market_close_summary_daily.json \
+  --fake \
+  --var market_close_date=2026-05-20 \
+  --asset GEMI \
+  --asset PLTR
+```
+
+Options:
+
+| Option | Description |
+|---|---|
+| `--var key=value` | Override `params.variables[key]`. Use for `run_prompt` placeholders. |
+| `--asset SYMBOL` | Replace `params.variables.assets`; also sets `assets_json` to a JSON array string. Repeat for multiple assets. |
+| `--set key=value` | Override top-level `params[key]`, such as `completion_signal_path`. |
+| `--runner opencode|claude|codex` | Override runner for this run only. |
+| `--fake` | Validate and render without invoking a real runner. |
+| `--env local|dev|prod` | Load `.env.<name>` before running. |
 
 ### Deploy Or Update Schedule
 
@@ -360,8 +402,14 @@ Use Make targets for local operation.
 | `make db-check-access` | Smoke-check scheduler, public pipeline, and private trading database access. |
 | `make compose-config` | Render Docker Compose config. |
 | `make worker` | Start generic host process worker. |
+| `make worker-background` | Start generic host process worker in the background and write logs to `.logs/`. |
+| `make worker-stop` | Stop the generic host worker started by `make worker-background`. |
 | `make worker-opencode` | Start host process worker named for OpenCode. |
+| `make worker-opencode-background` | Start host OpenCode worker in the background and write logs to `.logs/`. |
+| `make worker-opencode-stop` | Stop the OpenCode worker started by `make worker-opencode-background`. |
 | `make worker-claude` | Start host process worker named for Claude. |
+| `make worker-claude-background` | Start host Claude worker in the background and write logs to `.logs/`. |
+| `make worker-claude-stop` | Stop the Claude worker started by `make worker-claude-background`. |
 | `make worker-docker` | Start container worker. Requires selected runner CLI in image. |
 | `make worker-opencode-docker` | Start container OpenCode worker. Requires OpenCode in image. |
 | `make smoke-run-fake` | Validate smoke payload with fake runner. |
@@ -503,38 +551,23 @@ Codex:
 
 ## Backfill Pattern
 
-For one historical date, create a one-shot payload with the target date:
+Prefer `backfill run` for ad-hoc historical execution from an existing payload:
 
-```json
-{
-  "name": "stock-market-close-summary-2026-05-26",
-  "task": "run_prompt",
-  "runner": "opencode",
-  "schedule": {
-    "type": "once",
-    "run_at": "2026-05-27T09:00:00+07:00",
-    "timezone": "Asia/Singapore"
-  },
-  "params": {
-    "prompt": "Run skill in {skill_path} for the following assets: {assets}. Market close date: {market_close_date}.",
-    "variables": {
-      "skill_path": "examples/flows/market_close_summary",
-      "assets": ["GEMI", "PLTR"],
-      "market_close_date": "2026-05-26"
-    },
-    "completion_signal_path": "outputs/stock-market-close-summary-2026-05-26.done.json"
-  },
-  "work_pool_name": "agent-scheduler"
-}
+```bash
+uv run agent-scheduler backfill run examples/stock_market_close_summary_daily.json \
+  --var market_close_date=2026-05-26 \
+  --asset GEMI \
+  --asset PLTR \
+  --set completion_signal_path=outputs/stock-market-close-summary-2026-05-26.done.json
 ```
 
-Then deploy it:
+For many dates, invoke `backfill run` once per date from the calling harness.
+
+Use a one-shot payload only when the historical run itself should be stored as a Prefect deployment:
 
 ```bash
 uv run agent-scheduler deploy path/to/backfill_payload.json
 ```
-
-For many dates, generate one payload per date or create a future CLI helper that submits multiple one-shot runs.
 
 ## Notes For AI Harnesses
 

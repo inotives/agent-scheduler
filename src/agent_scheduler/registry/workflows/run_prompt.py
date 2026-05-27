@@ -74,10 +74,7 @@ class RunPromptWorkflow(RegisteredWorkflow):
             for name, value in workflow_params.variables.items()
         }
         if workflow_params.completion_signal_path is not None:
-            variables.setdefault(
-                "completion_signal_path",
-                str(workflow_params.completion_signal_path),
-            )
+            variables["completion_signal_path"] = str(workflow_params.completion_signal_path)
         try:
             return workflow_params.prompt.format(**variables)
         except KeyError as exc:

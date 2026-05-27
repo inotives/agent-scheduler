@@ -47,6 +47,8 @@ def check_config(
                 "agent_scheduler_database_configured": True,
                 "pipeline_database_configured": True,
                 "trading_private_database_configured": True,
+                "coingecko_api_base_url": settings.coingecko_api_base_url,
+                "coingecko_api_key_configured": bool(settings.coingecko_api_key),
             }
         )
     )

@@ -12,11 +12,16 @@ PAYLOAD ?= examples/stock_market_close_summary_daily.json
 SMOKE_PAYLOAD ?= examples/opencode_smoke.json
 POSTGRES_BOOTSTRAP_USER ?= prefect
 POSTGRES_BOOTSTRAP_DB ?= prefect
+POSTGRES_PORT ?= 5432
+PIPELINE_DB_NAME ?= pipeline_data
+PIPELINE_DB_USER ?= pipeline_app
+PIPELINE_DB_PASSWORD ?= pipeline_app
+LOCAL_PIPELINE_DATABASE_URL ?= postgresql+asyncpg://$(PIPELINE_DB_USER):$(PIPELINE_DB_PASSWORD)@127.0.0.1:$(POSTGRES_PORT)/$(PIPELINE_DB_NAME)
 
 export UV_CACHE_DIR ?= .uv-cache
 export PREFECT_HOME
 
-.PHONY: setup test help cli-help services-up services-down services-logs services-ps db-bootstrap-existing db-check-access worker worker-opencode worker-claude worker-docker worker-opencode-docker compose-config smoke-run-fake smoke-deploy smoke-run-deployment test-stock-market-close-summary flow-stock-market-close-summary-deploy flow-stock-market-close-summary-schedule flow-stock-market-close-summary-run
+.PHONY: setup test help cli-help services-up services-down services-logs services-ps db-bootstrap-existing db-check-access worker worker-background worker-stop worker-opencode worker-opencode-background worker-opencode-stop worker-claude worker-claude-background worker-claude-stop worker-docker worker-opencode-docker compose-config pipeline-coingecko-coins-dry-run pipeline-coingecko-coins-ingest pipeline-coingecko-asset-platforms-dry-run pipeline-coingecko-asset-platforms-ingest pipeline-coingecko-nfts-dry-run pipeline-coingecko-nfts-ingest pipeline-coingecko-deploy-schedules pipeline-coingecko-coins-run-deployment pipeline-coingecko-asset-platforms-run-deployment pipeline-coingecko-nfts-run-deployment smoke-run-fake smoke-deploy smoke-run-deployment test-stock-market-close-summary flow-stock-market-close-summary-deploy flow-stock-market-close-summary-schedule flow-stock-market-close-summary-run
 
 setup:
 	$(UV) venv --allow-existing
@@ -53,11 +58,32 @@ db-check-access:
 worker:
 	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(PREFECT_WORKER_NAME) --install-policy never
 
+worker-background:
+	@mkdir -p .logs
+	@sh -c 'PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(PREFECT_WORKER_NAME) --install-policy never > .logs/$(PREFECT_WORKER_NAME).log 2>&1 & pid=$$!; printf "%s\n" "$$pid" > .logs/$(PREFECT_WORKER_NAME).pid; printf "%s\n" "$$pid"'
+
+worker-stop:
+	@sh -c 'test -f .logs/$(PREFECT_WORKER_NAME).pid || { echo "No PID file for $(PREFECT_WORKER_NAME)"; exit 1; }; pid=$$(cat .logs/$(PREFECT_WORKER_NAME).pid); kill "$$pid"; rm -f .logs/$(PREFECT_WORKER_NAME).pid; echo "Stopped $(PREFECT_WORKER_NAME) ($$pid)"'
+
 worker-opencode:
 	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(OPENCODE_WORKER_NAME) --install-policy never
 
+worker-opencode-background:
+	@mkdir -p .logs
+	@sh -c 'PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(OPENCODE_WORKER_NAME) --install-policy never > .logs/$(OPENCODE_WORKER_NAME).log 2>&1 & pid=$$!; printf "%s\n" "$$pid" > .logs/$(OPENCODE_WORKER_NAME).pid; printf "%s\n" "$$pid"'
+
+worker-opencode-stop:
+	@sh -c 'test -f .logs/$(OPENCODE_WORKER_NAME).pid || { echo "No PID file for $(OPENCODE_WORKER_NAME)"; exit 1; }; pid=$$(cat .logs/$(OPENCODE_WORKER_NAME).pid); kill "$$pid"; rm -f .logs/$(OPENCODE_WORKER_NAME).pid; echo "Stopped $(OPENCODE_WORKER_NAME) ($$pid)"'
+
 worker-claude:
 	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(CLAUDE_WORKER_NAME) --install-policy never
+
+worker-claude-background:
+	@mkdir -p .logs
+	@sh -c 'PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect worker start --pool $(PREFECT_WORK_POOL) --type process --limit $(WORKER_LIMIT) --name $(CLAUDE_WORKER_NAME) --install-policy never > .logs/$(CLAUDE_WORKER_NAME).log 2>&1 & pid=$$!; printf "%s\n" "$$pid" > .logs/$(CLAUDE_WORKER_NAME).pid; printf "%s\n" "$$pid"'
+
+worker-claude-stop:
+	@sh -c 'test -f .logs/$(CLAUDE_WORKER_NAME).pid || { echo "No PID file for $(CLAUDE_WORKER_NAME)"; exit 1; }; pid=$$(cat .logs/$(CLAUDE_WORKER_NAME).pid); kill "$$pid"; rm -f .logs/$(CLAUDE_WORKER_NAME).pid; echo "Stopped $(CLAUDE_WORKER_NAME) ($$pid)"'
 
 worker-docker:
 	$(COMPOSE) --env-file $(ENV_FILE) --profile worker up prefect-worker
@@ -67,6 +93,36 @@ worker-opencode-docker:
 
 compose-config:
 	$(COMPOSE) --env-file $(ENV_FILE) config
+
+pipeline-coingecko-coins-dry-run:
+	$(UV) run python pipelines/coingecko/ingest_coins.py --dry-run
+
+pipeline-coingecko-coins-ingest:
+	PIPELINE_DATABASE_URL=$(LOCAL_PIPELINE_DATABASE_URL) $(UV) run python pipelines/coingecko/ingest_coins.py --include-platform
+
+pipeline-coingecko-asset-platforms-dry-run:
+	$(UV) run python pipelines/coingecko/ingest_asset_platforms.py --dry-run
+
+pipeline-coingecko-asset-platforms-ingest:
+	PIPELINE_DATABASE_URL=$(LOCAL_PIPELINE_DATABASE_URL) $(UV) run python pipelines/coingecko/ingest_asset_platforms.py
+
+pipeline-coingecko-nfts-dry-run:
+	$(UV) run python pipelines/coingecko/ingest_nfts.py --dry-run --max-pages 1
+
+pipeline-coingecko-nfts-ingest:
+	PIPELINE_DATABASE_URL=$(LOCAL_PIPELINE_DATABASE_URL) $(UV) run python pipelines/coingecko/ingest_nfts.py
+
+pipeline-coingecko-deploy-schedules:
+	PIPELINE_DATABASE_URL=$(LOCAL_PIPELINE_DATABASE_URL) PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run python pipelines/coingecko/deploy_schedules.py
+
+pipeline-coingecko-coins-run-deployment:
+	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect deployment run coingecko-ingest-coins/weekly-coingecko-coins-list
+
+pipeline-coingecko-asset-platforms-run-deployment:
+	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect deployment run coingecko-ingest-asset-platforms/weekly-coingecko-asset-platforms
+
+pipeline-coingecko-nfts-run-deployment:
+	PREFECT_API_URL=$(PREFECT_API_URL) $(UV) run prefect deployment run coingecko-ingest-nfts-list/weekly-coingecko-nfts-list
 
 smoke-run-fake:
 	$(UV) run agent-scheduler run-now --payload $(SMOKE_PAYLOAD) --fake

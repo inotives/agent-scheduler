@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -17,6 +18,7 @@ from agent_scheduler.schedules.types import WorkflowDeploymentSpec
 
 
 schedule_app = typer.Typer(help="Create and manage workflow schedules.")
+backfill_app = typer.Typer(help="Run historical workflow payloads with overrides.")
 
 
 def deploy_from_payload(payload_path: Path, env: str | None = None) -> None:
@@ -166,6 +168,73 @@ def run_now_command(
     echo_json({"ok": True, "result": result})
 
 
+@backfill_app.command("run")
+def backfill_run(
+    payload_path: Annotated[Path, typer.Argument(help="Path to schedule JSON payload.")],
+    set_values: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--set",
+            help="Override a top-level params value, e.g. --set completion_signal_path=outputs/backfill.done.json.",
+        ),
+    ] = None,
+    variables: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--var",
+            help="Override a run_prompt variable, e.g. --var market_close_date=2026-05-26.",
+        ),
+    ] = None,
+    asset: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--asset",
+            help="Replace run_prompt variables.assets with one asset. May be repeated.",
+        ),
+    ] = None,
+    runner: Annotated[
+        str | None,
+        typer.Option("--runner", help="Override payload runner for this backfill run."),
+    ] = None,
+    fake: Annotated[
+        bool,
+        typer.Option("--fake", help="Use fake runner for validation."),
+    ] = False,
+    env: Annotated[str | None, typer.Option("--env", help="Environment name.")] = None,
+) -> None:
+    """Run a historical payload immediately without changing its deployment schedule."""
+    try:
+        _apply_runtime_env(env)
+        payload = read_json_file(payload_path)
+        effective_payload = _apply_backfill_overrides(
+            payload,
+            set_values=set_values or [],
+            variables=variables or [],
+            assets=asset,
+            runner=runner,
+        )
+        result = _execute_payload_now(effective_payload, fake=fake)
+    except ValidationError as exc:
+        echo_error("invalid_payload", "Payload validation failed.", validation_details(exc))
+    except ValueError as exc:
+        echo_error("invalid_override", str(exc))
+    except Exception as exc:
+        echo_error("backfill_failed", str(exc))
+
+    echo_json(
+        {
+            "ok": True,
+            "name": effective_payload["name"],
+            "workflow_name": effective_payload.get(
+                "workflow_name",
+                effective_payload.get("task"),
+            ),
+            "runner": effective_payload.get("runner"),
+            "result": result,
+        }
+    )
+
+
 def _execute_payload_now(payload: dict[str, Any], fake: bool) -> dict[str, Any]:
     from agent_scheduler.flows import execute_registered_workflow
     from agent_scheduler.runners import FakeRunnerAdapter
@@ -179,6 +248,60 @@ def _execute_payload_now(payload: dict[str, Any], fake: bool) -> dict[str, Any]:
         adapter=adapter,
     )
     return result.model_dump()
+
+
+def _apply_backfill_overrides(
+    payload: dict[str, Any],
+    *,
+    set_values: list[str],
+    variables: list[str],
+    assets: list[str] | None,
+    runner: str | None,
+) -> dict[str, Any]:
+    effective_payload = dict(payload)
+    params = dict(effective_payload.get("params") or {})
+    effective_payload["params"] = params
+
+    for override in set_values:
+        key, value = _parse_key_value(override)
+        params[key] = _coerce_override_value(value)
+
+    if variables or assets is not None:
+        prompt_variables = dict(params.get("variables") or {})
+        for override in variables:
+            key, value = _parse_key_value(override)
+            prompt_variables[key] = _coerce_override_value(value)
+        if assets is not None:
+            cleaned_assets = [item.strip() for item in assets if item.strip()]
+            if not cleaned_assets:
+                raise ValueError("--asset requires at least one non-blank value")
+            prompt_variables["assets"] = cleaned_assets
+            prompt_variables["assets_json"] = json.dumps(cleaned_assets)
+        params["variables"] = prompt_variables
+
+    if runner is not None:
+        if not runner.strip():
+            raise ValueError("--runner must not be blank")
+        effective_payload["runner"] = runner.strip()
+
+    return effective_payload
+
+
+def _parse_key_value(raw: str) -> tuple[str, str]:
+    if "=" not in raw:
+        raise ValueError(f"override must use key=value format: {raw}")
+    key, value = raw.split("=", 1)
+    key = key.strip()
+    if not key:
+        raise ValueError(f"override key must not be blank: {raw}")
+    return key, value.strip()
+
+
+def _coerce_override_value(value: str) -> Any:
+    text = value.strip()
+    if "," in text:
+        return [item.strip() for item in text.split(",") if item.strip()]
+    return text
 
 
 def _apply_runtime_env(env: str | None):
