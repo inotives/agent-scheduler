@@ -20,7 +20,12 @@ def deploy_workflow(spec: WorkflowDeploymentSpec, global_concurrency_limit: int 
     upsert_runtime_concurrency_limits(rendered, global_limit=global_concurrency_limit)
     ensure_work_pool(spec.work_pool_name)
     schedule = build_prefect_schedule(spec.schedule)
-    deployment = run_agent_workflow.to_deployment(
+    flow = run_agent_workflow.with_options(
+        retries=rendered.policy.retries,
+        retry_delay_seconds=rendered.policy.retry_delay_seconds,
+        timeout_seconds=rendered.policy.timeout_seconds + 30,
+    )
+    deployment = flow.to_deployment(
         name=spec.name,
         work_pool_name=spec.work_pool_name,
         work_queue_name=spec.work_queue_name,

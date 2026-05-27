@@ -15,6 +15,10 @@ def test_deploy_workflow_sets_process_worker_working_dir(monkeypatch) -> None:
             return deployment_id
 
     class FakeFlow:
+        def with_options(self, **kwargs):
+            calls["flow_options"] = kwargs
+            return self
+
         def to_deployment(self, **kwargs):
             calls["deployment_kwargs"] = kwargs
             return FakeDeployment()
@@ -39,5 +43,10 @@ def test_deploy_workflow_sets_process_worker_working_dir(monkeypatch) -> None:
     )
 
     assert result == deployment_id
+    assert calls["flow_options"] == {
+        "retries": 0,
+        "retry_delay_seconds": 60,
+        "timeout_seconds": 3630,
+    }
     assert calls["deployment_kwargs"]["job_variables"] == {"working_dir": str(Path.cwd())}
     assert calls["apply_work_pool_name"] == "agent-scheduler"
