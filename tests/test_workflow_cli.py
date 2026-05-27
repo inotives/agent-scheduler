@@ -14,7 +14,7 @@ def write_payload(tmp_path: Path) -> Path:
     payload = {
         "name": "daily-gemi-close",
         "workflow_name": "run_skill_for_assets",
-        "schedule": {"type": "cron", "cron": "0 16 * * *", "timezone": "Asia/Jakarta"},
+        "schedule": {"type": "cron", "cron": "0 16 * * *", "timezone": "Asia/Singapore"},
         "params": {"path_to_skill": "/skills/market-close", "assets": ["GEMI"]},
         "runner": "codex",
     }

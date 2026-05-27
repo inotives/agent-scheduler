@@ -44,7 +44,9 @@ def check_config(
                 "env": settings.app_env,
                 "prefect_api_url": settings.prefect_api_url,
                 "prefect_database_configured": True,
+                "agent_scheduler_database_configured": True,
+                "pipeline_database_configured": True,
+                "trading_private_database_configured": True,
             }
         )
     )
-

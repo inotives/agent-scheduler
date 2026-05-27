@@ -31,7 +31,7 @@ def test_deploy_workflow_sets_process_worker_working_dir(monkeypatch) -> None:
                 "schedule": {
                     "type": "cron",
                     "cron": "0 16 * * *",
-                    "timezone": "Asia/Jakarta",
+                    "timezone": "Asia/Singapore",
                 },
                 "params": {"path_to_skill": "/skills/audit", "assets": ["GEMI"]},
             }

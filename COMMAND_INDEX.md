@@ -230,6 +230,15 @@ uv run agent-scheduler config check --env prod
 
 Purpose: validate selected `.env` configuration.
 
+Required database URLs:
+
+| Variable | Boundary |
+|---|---|
+| `PREFECT_API_DATABASE_CONNECTION_URL` | Prefect orchestration database only. |
+| `AGENT_SCHEDULER_DATABASE_URL` | Scheduler metadata database, `scheduler_app` schema. |
+| `PIPELINE_DATABASE_URL` | General pipeline and public dataset database, `pipeline_app` and `public_data` schemas. |
+| `TRADING_PRIVATE_DATABASE_URL` | Private trading dataset writer, `trading_private` schema. |
+
 ### Validate Payload With Fake Runner
 
 ```bash
@@ -347,6 +356,8 @@ Use Make targets for local operation.
 | `make services-down` | Stop local services and worker profile containers. |
 | `make services-logs` | Tail Postgres and Prefect server logs. |
 | `make services-ps` | Show Docker Compose service status. |
+| `make db-bootstrap-existing` | Apply database bootstrap to an existing local Postgres volume. |
+| `make db-check-access` | Smoke-check scheduler, public pipeline, and private trading database access. |
 | `make compose-config` | Render Docker Compose config. |
 | `make worker` | Start generic host process worker. |
 | `make worker-opencode` | Start host process worker named for OpenCode. |
@@ -374,6 +385,8 @@ Make variables:
 | `WORKER_LIMIT` | `2` |
 | `PAYLOAD` | `examples/stock_market_close_summary_daily.json` |
 | `SMOKE_PAYLOAD` | `examples/opencode_smoke.json` |
+| `POSTGRES_BOOTSTRAP_USER` | `prefect` |
+| `POSTGRES_BOOTSTRAP_DB` | `prefect` |
 
 Override example:
 
@@ -409,6 +422,19 @@ make test-stock-market-close-summary
 ```bash
 make services-up
 make services-ps
+```
+
+On a fresh Postgres volume, verify database and schema access:
+
+```bash
+make db-check-access
+```
+
+For a local Postgres volume created before the separated database layout:
+
+```bash
+make db-bootstrap-existing
+make db-check-access
 ```
 
 6. Start worker in another terminal:

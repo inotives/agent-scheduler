@@ -22,6 +22,24 @@ class AppSettings(BaseSettings):
     prefect_api_database_connection_url: str = Field(
         alias="PREFECT_API_DATABASE_CONNECTION_URL",
     )
+    agent_scheduler_database_url: str = Field(
+        default=(
+            "postgresql+asyncpg://agent_scheduler_app:"
+            "agent_scheduler@postgres:5432/agent_scheduler"
+        ),
+        alias="AGENT_SCHEDULER_DATABASE_URL",
+    )
+    pipeline_database_url: str = Field(
+        default="postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data",
+        alias="PIPELINE_DATABASE_URL",
+    )
+    trading_private_database_url: str = Field(
+        default=(
+            "postgresql+asyncpg://trading_private_writer:"
+            "trading_private@postgres:5432/pipeline_data"
+        ),
+        alias="TRADING_PRIVATE_DATABASE_URL",
+    )
     agent_scheduler_global_concurrency: int = Field(
         default=2,
         ge=1,
@@ -45,3 +63,6 @@ def apply_prefect_environment(settings: AppSettings) -> None:
     os.environ["PREFECT_API_DATABASE_CONNECTION_URL"] = (
         settings.prefect_api_database_connection_url
     )
+    os.environ["AGENT_SCHEDULER_DATABASE_URL"] = settings.agent_scheduler_database_url
+    os.environ["PIPELINE_DATABASE_URL"] = settings.pipeline_database_url
+    os.environ["TRADING_PRIVATE_DATABASE_URL"] = settings.trading_private_database_url

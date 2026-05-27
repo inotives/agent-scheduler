@@ -4,7 +4,7 @@
   "schedule": {
     "type": "cron",
     "cron": "0 16 * * *",
-    "timezone": "Asia/Jakarta"
+    "timezone": "Asia/Singapore"
   },
   "params": {
     "prompt": "Run skill in {skill_path} for the following assets: {assets}.\n\nMarket close date: {market_close_date}.\n\nGenerate the actual report exactly as defined by the skill instructions, including the output format and output path specified by the skill.\n\nAfter the skill has produced its report, write a completion signal JSON file to {completion_signal_path} with at least: {{\"status\":\"completed\",\"assets\":{assets_json},\"market_close_date\":\"{market_close_date}\"}}.",

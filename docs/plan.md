@@ -185,7 +185,7 @@ Example schedule payload:
   "schedule": {
     "type": "cron",
     "cron": "0 16 * * *",
-    "timezone": "Asia/Jakarta"
+    "timezone": "Asia/Singapore"
   },
   "params": {
     "prompt": "Run skill in {skill_path} for the following assets: {assets}. Market close date: {market_close_date}.",
@@ -313,6 +313,12 @@ Acceptance:
 - Scheduler metadata has a distinct application database/schema.
 - Public external datasets and private trading datasets are separated in `pipeline_data` schemas.
 - Tests or smoke checks prove each configured user can access only its intended database/schema.
+
+Implementation notes:
+
+- Postgres bootstrap scripts live in `infra/postgres/init/`.
+- `make db-check-access` smoke-checks writes for `scheduler_app`, `public_data`, and `trading_private`.
+- Existing local Postgres volumes must be recreated intentionally before bootstrap scripts can create the new databases and schemas.
 
 ## Test Plan
 

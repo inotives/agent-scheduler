@@ -35,7 +35,7 @@ Agent Scheduler uses Prefect for orchestration and Postgres-backed state while k
 | | |
 |---|---|
 | **Prompt-template workflows** | Store prompt text plus variables in Prefect deployment parameters, then render the final prompt at run time. |
-| **Pluggable runners** | OpenCode is default, Codex is supported, fake runner is available for tests. |
+| **Pluggable runners** | OpenCode is default, Claude and Codex are supported, fake runner is available for tests. |
 | **Postgres-backed orchestration** | Prefect stores deployments, schedules, run parameters, logs, and state in Postgres. |
 | **Completion signals** | Workflows can require a small `.done.json` signal so Prefect can verify the agent finished. |
 | **Skill-owned artifacts** | The agent skill owns the actual report/output format and path, such as markdown reports. |
@@ -75,6 +75,44 @@ The markdown report is produced wherever the local example skill says to store i
 
 ---
 
+## Permission Model
+
+Agent Scheduler orchestrates runs; the selected agent harness performs the work. A scheduled agent can only use the capabilities available to the worker process that launched it.
+
+Typical permission boundaries:
+
+| Boundary | Examples |
+|---|---|
+| Filesystem | Workspace files, output folders, mounted volumes. |
+| Network | Public APIs, private APIs, package registries, internal services. |
+| Installed tools | `opencode`, `claude`, `codex`, `psql`, project CLIs, data tools. |
+| Environment secrets | Database URLs, API keys, exchange credentials, cloud tokens. |
+| Database roles | Read-only analytics, public dataset writer, private trading writer. |
+
+This means the system is intentionally broad but permission-scoped. If a worker has `PIPELINE_DATABASE_URL`, an agent can write public pipeline data. If a worker has private exchange credentials, an agent may be able to perform private trading actions. Production deployments should pass only the secrets and tools needed by that specific workflow.
+
+For direct DB-writing prompts, the prompt must specify the database URL env var, schema, table, columns, and insert/upsert behavior. Example:
+
+```text
+Get current local weather for Singapore.
+
+Store the result using PIPELINE_DATABASE_URL.
+Use table public_data.weather_observations.
+Create the table if it does not exist.
+Insert one row with observed_at, location, temperature_c, condition, humidity_percent, source, raw_payload, and created_at.
+After the insert succeeds, print a JSON summary with status and inserted row count.
+```
+
+For repeatable production pipelines, prefer a repo-owned command or script with tested schema handling:
+
+```text
+Run `agent-scheduler pipeline ingest-weather --location Singapore` and report whether it succeeded.
+```
+
+That keeps schema creation, validation, migrations, and credentials inside code rather than relying on prompt-generated SQL.
+
+---
+
 ## Supported Runners
 
 | Runner | Status | Purpose |
@@ -84,10 +122,18 @@ The markdown report is produced wherever the local example skill says to store i
 | `codex` | Supported | Alternative headless agent harness. |
 | `fake` | Test-only | Validates payloads and prompt rendering without invoking a real agent. |
 
-OpenCode, Claude, and Codex must be installed in the runtime that starts the worker. For local development, use a host worker:
+OpenCode, Claude, and Codex must be installed in the runtime that starts the worker. For local development, use a host worker.
+
+Default OpenCode worker:
 
 ```bash
 make worker-opencode
+```
+
+Claude worker:
+
+```bash
+make worker-claude
 ```
 
 The Docker worker is available for containerized deployments, but it needs the selected agent CLI installed inside the image.
@@ -174,6 +220,31 @@ Then review `.env.local`. At minimum, local development expects:
 ```text
 PREFECT_API_URL=http://127.0.0.1:4200/api
 PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@postgres:5432/prefect
+AGENT_SCHEDULER_DATABASE_URL=postgresql+asyncpg://agent_scheduler_app:agent_scheduler@postgres:5432/agent_scheduler
+PIPELINE_DATABASE_URL=postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data
+TRADING_PRIVATE_DATABASE_URL=postgresql+asyncpg://trading_private_writer:trading_private@postgres:5432/pipeline_data
+```
+
+For Docker bootstrap, the local Postgres container should start with the admin database defaults, then the init script creates the app databases and users:
+
+```text
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=postgres
+
+PREFECT_DB_NAME=prefect
+PREFECT_DB_USER=prefect
+PREFECT_DB_PASSWORD=prefect
+AGENT_SCHEDULER_DB_NAME=agent_scheduler
+AGENT_SCHEDULER_DB_USER=agent_scheduler_app
+AGENT_SCHEDULER_DB_PASSWORD=agent_scheduler
+PIPELINE_DB_NAME=pipeline_data
+PIPELINE_DB_USER=pipeline_app
+PIPELINE_DB_PASSWORD=pipeline_app
+TRADING_PRIVATE_DB_USER=trading_private_writer
+TRADING_PRIVATE_DB_PASSWORD=trading_private
+ANALYTICS_DB_USER=analytics_reader
+ANALYTICS_DB_PASSWORD=analytics_reader
 ```
 
 Real `.env.local`, `.env.dev`, and `.env.prod` files are gitignored.
@@ -211,12 +282,31 @@ Prefect UI runs at:
 http://127.0.0.1:4200
 ```
 
+On a fresh Postgres volume, startup creates separate databases for Prefect orchestration, scheduler app metadata, and pipeline datasets. To smoke-check application database access:
+
+```bash
+make db-check-access
+```
+
+If the local Postgres volume was created before the separated database layout, apply the idempotent bootstrap once before checking access:
+
+```bash
+make db-bootstrap-existing
+make db-check-access
+```
+
 ### 7. Start a worker
 
 For local OpenCode runs, start a host worker because OpenCode is installed on the host:
 
 ```bash
 make worker-opencode
+```
+
+For Claude runs, use the Claude worker instead:
+
+```bash
+make worker-claude
 ```
 
 Keep this terminal open.
@@ -261,7 +351,7 @@ External harnesses integrate through JSON payloads and CLI calls. The contract i
   "schedule": {
     "type": "cron",
     "cron": "0 16 * * *",
-    "timezone": "Asia/Jakarta"
+    "timezone": "Asia/Singapore"
   },
   "params": {
     "prompt": "Run skill in {skill_path} for the following assets: {assets}.",
@@ -294,7 +384,7 @@ One-shot schedule shape:
 {
   "type": "once",
   "run_at": "2026-05-27T16:00:00+07:00",
-  "timezone": "Asia/Jakarta"
+  "timezone": "Asia/Singapore"
 }
 ```
 
@@ -389,7 +479,13 @@ or:
 }
 ```
 
-The worker runtime must have the selected `claude` or `codex` CLI installed.
+The worker runtime must have the selected `claude` or `codex` CLI installed. For Claude, start a host worker with:
+
+```bash
+make worker-claude
+```
+
+The Claude runner invokes Claude Code in headless print mode and expects `claude` to be available on `PATH`.
 
 ### Environment Selection
 
@@ -428,6 +524,8 @@ make test                   # Run pytest
 make services-up            # Start Postgres and Prefect server
 make services-down          # Stop local services
 make services-logs          # Tail service logs
+make db-bootstrap-existing  # Apply DB bootstrap to an existing local Postgres volume
+make db-check-access        # Smoke-check scheduler, public pipeline, and private trading DB access
 make worker-opencode        # Start host process worker for OpenCode
 make worker-claude          # Start host process worker for Claude
 make worker                 # Start generic host process worker
@@ -467,11 +565,30 @@ Important settings:
 | Setting | Purpose |
 |---|---|
 | `PREFECT_API_URL` | Prefect API endpoint used by local CLI and workers. |
-| `PREFECT_API_DATABASE_CONNECTION_URL` | Postgres connection URL used by the Prefect server. |
+| `PREFECT_API_DATABASE_CONNECTION_URL` | Postgres connection URL used only by the Prefect server. |
+| `AGENT_SCHEDULER_DATABASE_URL` | Scheduler application metadata database URL. |
+| `PIPELINE_DATABASE_URL` | General pipeline/public dataset database URL. |
+| `TRADING_PRIVATE_DATABASE_URL` | Private trading dataset writer database URL. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Local Postgres bootstrap admin credentials. Defaults are `postgres/postgres/postgres`. |
 | `AGENT_SCHEDULER_GLOBAL_CONCURRENCY` | Global concurrent agent run limit. |
 | `OPENCODE_WORKER_NAME` | Name used by the OpenCode worker. |
+| `CLAUDE_WORKER_NAME` | Name used by the Claude worker. |
 
 Prefect Variables may be used for non-secret shared defaults. Credentials should live in env files or Prefect secrets, not in Prefect Variables.
+
+### Database Boundaries
+
+The local Postgres container is initialized with separate database ownership boundaries:
+
+| Database | Schema | Owner / Writer | Purpose |
+|---|---|---|---|
+| `prefect` | Prefect-managed | `prefect` | Prefect orchestration tables only. |
+| `agent_scheduler` | `scheduler_app` | `agent_scheduler_app` | Scheduler metadata, audit events, artifact indexes, and runner telemetry. |
+| `pipeline_data` | `pipeline_app` | `pipeline_app` | Pipeline events, dataset versions, and source API logs. |
+| `pipeline_data` | `public_data` | `pipeline_app` | Public external datasets such as CoinGecko or CoinMarketCap data. |
+| `pipeline_data` | `trading_private` | `trading_private_writer` | Orderbooks, executions, balances, positions, and account snapshots. |
+
+Postgres init scripts run only when Docker creates a new Postgres volume. If an existing local volume was created before this layout, create a new volume intentionally before expecting these databases and schemas to exist.
 
 ---
 
@@ -482,7 +599,7 @@ src/agent_scheduler/
   cli/              # Agent-facing CLI commands and JSON output
   config/           # Settings and env loading
   registry/         # Registered workflows and prompt rendering
-  runners/          # OpenCode, Codex, fake runner adapters
+  runners/          # OpenCode, Claude, Codex, fake runner adapters
   flows/            # Prefect flow and deployment helpers
   schedules/        # Schedule payload types and lifecycle helpers
   concurrency/      # Runtime concurrency keys and limits
@@ -504,7 +621,7 @@ Implemented:
 - Python 3.12 + `uv` project scaffold
 - Prefect + Postgres local runtime
 - workflow registry
-- OpenCode, Codex, and fake runner adapters
+- OpenCode, Claude, Codex, and fake runner adapters
 - generic `run_prompt` workflow
 - deployment and run-now CLI paths
 - stock market close summary payload

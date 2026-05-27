@@ -26,6 +26,9 @@ def test_config_check_loads_selected_env_file(tmp_path, monkeypatch) -> None:
         "env": "dev",
         "prefect_api_url": "http://prefect-dev:4200/api",
         "prefect_database_configured": True,
+        "agent_scheduler_database_configured": True,
+        "pipeline_database_configured": True,
+        "trading_private_database_configured": True,
     }
 
 
@@ -40,4 +43,3 @@ def test_config_check_reports_missing_required_database_url(tmp_path, monkeypatc
     assert payload["ok"] is False
     assert payload["error"]["code"] == "invalid_config"
     assert payload["error"]["details"][0]["loc"] == ["PREFECT_API_DATABASE_CONNECTION_URL"]
-
