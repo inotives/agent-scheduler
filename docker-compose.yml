@@ -1,0 +1,138 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      PREFECT_DB_NAME: ${PREFECT_DB_NAME:-prefect}
+      PREFECT_DB_USER: ${PREFECT_DB_USER:-prefect}
+      PREFECT_DB_PASSWORD: ${PREFECT_DB_PASSWORD:-prefect}
+      AGENT_SCHEDULER_DB_NAME: ${AGENT_SCHEDULER_DB_NAME:-agent_scheduler}
+      AGENT_SCHEDULER_DB_USER: ${AGENT_SCHEDULER_DB_USER:-agent_scheduler_app}
+      AGENT_SCHEDULER_DB_PASSWORD: ${AGENT_SCHEDULER_DB_PASSWORD:-agent_scheduler}
+      PIPELINE_DB_NAME: ${PIPELINE_DB_NAME:-pipeline_data}
+      PIPELINE_DB_USER: ${PIPELINE_DB_USER:-pipeline_app}
+      PIPELINE_DB_PASSWORD: ${PIPELINE_DB_PASSWORD:-pipeline_app}
+      TRADING_PRIVATE_DB_USER: ${TRADING_PRIVATE_DB_USER:-trading_private_writer}
+      TRADING_PRIVATE_DB_PASSWORD: ${TRADING_PRIVATE_DB_PASSWORD:-trading_private}
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER:-analytics_reader}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-analytics_reader}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  prefect-server:
+    build:
+      context: .
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      PREFECT_HOME: /app/.prefect
+      PREFECT_API_DATABASE_CONNECTION_URL: ${PREFECT_API_DATABASE_CONNECTION_URL:-postgresql+asyncpg://prefect:prefect@postgres:5432/prefect}
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_API_PORT: 4200
+      PREFECT_UI_API_URL: ${PREFECT_UI_API_URL:-http://127.0.0.1:4200/api}
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+    ports:
+      - "${PREFECT_SERVER_PORT:-4200}:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - prefect-home:/app/.prefect
+
+  prefect-worker:
+    build:
+      context: .
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      PREFECT_HOME: /app/.prefect
+      PREFECT_API_URL: ${PREFECT_WORKER_API_URL:-http://prefect-server:4200/api}
+      AGENT_SCHEDULER_DATABASE_URL: ${AGENT_SCHEDULER_DATABASE_URL:-postgresql+asyncpg://agent_scheduler_app:agent_scheduler@postgres:5432/agent_scheduler}
+      PIPELINE_DATABASE_URL: ${PIPELINE_DATABASE_URL:-postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data}
+      TRADING_PRIVATE_DATABASE_URL: ${TRADING_PRIVATE_DATABASE_URL:-postgresql+asyncpg://trading_private_writer:trading_private@postgres:5432/pipeline_data}
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    command:
+      [
+        "prefect",
+        "worker",
+        "start",
+        "--pool",
+        "${PREFECT_WORK_POOL:-agent-scheduler}",
+        "--type",
+        "process",
+        "--limit",
+        "${AGENT_SCHEDULER_WORKER_LIMIT:-2}",
+        "--name",
+        "${PREFECT_WORKER_NAME:-agent-scheduler-worker}",
+        "--install-policy",
+        "never",
+      ]
+    depends_on:
+      - prefect-server
+    profiles:
+      - worker
+    volumes:
+      - prefect-home:/app/.prefect
+
+  prefect-worker-opencode:
+    build:
+      context: .
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      PREFECT_HOME: /app/.prefect
+      PREFECT_API_URL: ${PREFECT_WORKER_API_URL:-http://prefect-server:4200/api}
+      AGENT_SCHEDULER_DATABASE_URL: ${AGENT_SCHEDULER_DATABASE_URL:-postgresql+asyncpg://agent_scheduler_app:agent_scheduler@postgres:5432/agent_scheduler}
+      PIPELINE_DATABASE_URL: ${PIPELINE_DATABASE_URL:-postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data}
+      TRADING_PRIVATE_DATABASE_URL: ${TRADING_PRIVATE_DATABASE_URL:-postgresql+asyncpg://trading_private_writer:trading_private@postgres:5432/pipeline_data}
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    command:
+      [
+        "prefect",
+        "worker",
+        "start",
+        "--pool",
+        "${PREFECT_WORK_POOL:-agent-scheduler}",
+        "--type",
+        "process",
+        "--limit",
+        "${AGENT_SCHEDULER_WORKER_LIMIT:-2}",
+        "--name",
+        "${OPENCODE_WORKER_NAME:-agent-scheduler-opencode-worker}",
+        "--install-policy",
+        "never",
+      ]
+    depends_on:
+      - prefect-server
+    profiles:
+      - worker
+    volumes:
+      - prefect-home:/app/.prefect
+
+  scheduler-cli:
+    build:
+      context: .
+    environment:
+      TZ: ${TZ:-Asia/Singapore}
+      PREFECT_API_URL: ${PREFECT_WORKER_API_URL:-http://prefect-server:4200/api}
+      AGENT_SCHEDULER_DATABASE_URL: ${AGENT_SCHEDULER_DATABASE_URL:-postgresql+asyncpg://agent_scheduler_app:agent_scheduler@postgres:5432/agent_scheduler}
+      PIPELINE_DATABASE_URL: ${PIPELINE_DATABASE_URL:-postgresql+asyncpg://pipeline_app:pipeline_app@postgres:5432/pipeline_data}
+      TRADING_PRIVATE_DATABASE_URL: ${TRADING_PRIVATE_DATABASE_URL:-postgresql+asyncpg://trading_private_writer:trading_private@postgres:5432/pipeline_data}
+    command: ["agent-scheduler", "--help"]
+    depends_on:
+      - prefect-server
+    profiles:
+      - tools
+
+volumes:
+  postgres-data:
+  prefect-home:

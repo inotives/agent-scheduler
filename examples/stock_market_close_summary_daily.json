@@ -1,0 +1,21 @@
+{
+  "name": "daily-stock-market-close-summary",
+  "task": "run_prompt",
+  "schedule": {
+    "type": "cron",
+    "cron": "0 16 * * *",
+    "timezone": "Asia/Singapore"
+  },
+  "params": {
+    "prompt": "Run skill in {skill_path} for the following assets: {assets}.\n\nMarket close date: {market_close_date}.\n\nGenerate the actual report exactly as defined by the skill instructions, including the output format and output path specified by the skill.\n\nAfter the skill has produced its report, write a completion signal JSON file to {completion_signal_path} with at least: {{\"status\":\"completed\",\"assets\":{assets_json},\"market_close_date\":\"{market_close_date}\"}}.",
+    "variables": {
+      "skill_path": "examples/flows/market_close_summary",
+      "assets": ["GEMI", "PLTR"],
+      "assets_json": "[\"GEMI\",\"PLTR\"]",
+      "market_close_date": "2026-05-26",
+      "completion_signal_path": "outputs/daily-stock-market-close-summary.done.json"
+    },
+    "completion_signal_path": "outputs/daily-stock-market-close-summary.done.json"
+  },
+  "work_pool_name": "agent-scheduler"
+}

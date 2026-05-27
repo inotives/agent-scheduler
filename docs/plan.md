@@ -2,9 +2,9 @@
 
 ## Summary
 
-Build a new `uv` Python 3.12 project named `agent-scheduler` that exposes an agent-friendly CLI for scheduling headless agent tasks through Prefect. The system uses registered, typed Python task definitions, Prefect backed by Postgres as the orchestration/state backend, and pluggable runner adapters for Codex headless, OpenCode headless, and future agent CLIs.
+Build a new `uv` Python 3.12 project named `agent-scheduler` that exposes an agent-friendly CLI for scheduling headless agent tasks through Prefect. The system uses registered, typed Python task definitions, Prefect backed by Postgres as the orchestration/state backend, and pluggable runner adapters for OpenCode headless, Claude Code headless, Codex headless, and future agent CLIs.
 
-Primary v1 use case: schedule a registered prompt-template workflow, such as running a skill from `<path_to_skill>` against an `<asset-list>` every day at `16:00:00`, using either OpenCode headless or Codex headless.
+Primary v1 use case: schedule a registered prompt-template workflow, such as running a skill from `<path_to_skill>` against an `<asset-list>` every day at `16:00:00`, using OpenCode, Claude Code, or Codex headless.
 
 ## Phase 1: Project Scaffold
 
@@ -108,6 +108,7 @@ Goal: invoke headless agents through a stable internal runner interface.
 - Define a runner context JSON contract containing task name, validated params, workspace, Prefect run metadata, schedule/run IDs, attempt info, and rendered prompt.
 - Implement runner adapters for:
   - Codex headless
+  - Claude Code headless
   - OpenCode headless
   - fake/test runner
 - Stream runner stdout/stderr into Prefect logs.
@@ -117,7 +118,7 @@ Goal: invoke headless agents through a stable internal runner interface.
 Acceptance:
 
 - Fake runner can execute a workflow in tests without external agent CLIs.
-- Codex/OpenCode command construction is isolated to runner adapters.
+- OpenCode/Claude/Codex command construction is isolated to runner adapters.
 - Runner failures propagate to Prefect as failed runs.
 
 ## Phase 6: Prefect Flow and Scheduling Lifecycle
@@ -166,31 +167,35 @@ Acceptance:
 - Agents can inspect, pause, resume, and delete schedules.
 - CLI errors are structured and machine-readable.
 
-## Phase 8: First Workable MVP
+## Phase 8: First Workable Deployment
 
 Goal: prove the end-to-end daily skill execution use case.
 
-Implement the first registered workflow:
+Implement the first registered workflow around a generic prompt template:
 
 ```text
-Run skill in <path_to_skill> for the following assets: <asset-list>
+<prompt text with optional {variables}>
 ```
 
 Example schedule payload:
 
 ```json
 {
-  "task": "run_skill_for_assets",
+  "task": "run_prompt",
   "schedule": {
     "type": "cron",
     "cron": "0 16 * * *",
-    "timezone": "Asia/Jakarta"
+    "timezone": "Asia/Singapore"
   },
   "params": {
-    "path_to_skill": "/path/to/skill",
-    "assets": ["asset-a", "asset-b"]
+    "prompt": "Run skill in {skill_path} for the following assets: {assets}. Market close date: {market_close_date}.",
+    "variables": {
+      "skill_path": "/path/to/skill",
+      "assets": ["GEMI", "PLTR"],
+      "market_close_date": "2026-05-26"
+    }
   },
-  "runner": "codex"
+  "runner": "opencode"
 }
 ```
 
@@ -202,7 +207,7 @@ Prefect schedule triggers
   -> flow loads the registered workflow
   -> flow validates parameters
   -> flow renders the final prompt
-  -> flow invokes Codex/OpenCode headless
+  -> flow invokes OpenCode/Claude/Codex headless
   -> agent executes until success, failure, or timeout
   -> Prefect records logs, status, retries, and result metadata
 ```
@@ -215,6 +220,178 @@ Acceptance:
 - `agent-scheduler schedule ...` creates a daily 16:00 schedule with explicit timezone.
 - `agent-scheduler run-now ...` executes the workflow through the fake runner in tests and a real runner in local development when installed.
 - Prefect shows run history, logs, status, and failures.
+
+## Fix Phase: Prompt Template Parameters
+
+Goal: simplify scheduled agent work so Prefect passes a final prompt string to OpenCode/Claude/Codex.
+
+- Add a generic `run_prompt` workflow as the primary scheduled workflow path.
+- Store prompt templates and schedule-specific variables as Prefect deployment parameters.
+- Render variables at flow runtime before invoking the selected runner.
+- Render list variables as comma-separated text, e.g. `["GEMI", "PLTR"]` becomes `GEMI, PLTR`.
+- Allow `run_prompt` to declare a completion signal JSON path that the flow verifies after a real runner exits.
+- Keep skill-generated artifacts separate from scheduler completion signals; markdown output belongs to the skill contract.
+- Keep `run_skill_for_assets` available as a compatibility workflow, but use `run_prompt` for the stock market close summary example.
+- Use Prefect UI/API/CLI to update deployment parameters in Postgres; avoid direct SQL updates.
+- Use ad-hoc flow runs with parameter overrides for historical backfills.
+
+Acceptance:
+
+- `run_prompt` accepts plain prompt text with optional variables.
+- Missing prompt variables fail before invoking the runner.
+- The stock market close summary payload schedules the skill for configured assets, with `GEMI` and `PLTR` as the default example assets for market close date `2026-05-26`.
+- The stock market close summary payload asks the agent to write a completion signal JSON after the skill-generated markdown has been produced.
+
+## Phase 9: Database Separation For Scheduler And Pipeline Data
+
+Goal: keep orchestration state, scheduler application metadata, and custom pipeline datasets separated by database and schema boundaries.
+
+Database layout:
+
+```text
+postgres
+  database: prefect
+    - Prefect-owned orchestration tables only
+
+  database: agent_scheduler
+    schema: scheduler_app
+      - scheduler-owned metadata
+      - run artifact index
+      - completion signal mirror
+      - workflow registry snapshots
+      - deployment audit events
+      - agent runner telemetry
+
+  database: pipeline_data
+    schema: pipeline_app
+      - ingestion events
+      - dataset versions
+      - source API request logs
+
+    schema: public_data
+      - external public datasets
+      - CoinGecko assets/prices
+      - CoinMarketCap quotes
+      - public market/reference snapshots
+
+    schema: trading_private
+      - orderbooks
+      - trade executions
+      - balances
+      - positions
+      - account snapshots
+```
+
+Configuration:
+
+```env
+PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:...@postgres:5432/prefect
+AGENT_SCHEDULER_DATABASE_URL=postgresql+asyncpg://agent_scheduler_app:...@postgres:5432/agent_scheduler
+PIPELINE_DATABASE_URL=postgresql+asyncpg://pipeline_app:...@postgres:5432/pipeline_data
+TRADING_PRIVATE_DATABASE_URL=postgresql+asyncpg://trading_private_writer:...@postgres:5432/pipeline_data
+```
+
+Implementation tasks:
+
+- Add Postgres init scripts under `infra/postgres/init/`.
+- Create separate databases for `prefect`, `agent_scheduler`, and `pipeline_data`.
+- Create separate users for Prefect, scheduler app metadata, general pipeline writes, trading-private writes, and read-only analytics.
+- Create schemas `scheduler_app`, `pipeline_app`, `public_data`, and `trading_private`.
+- Grant least-privilege access:
+  - Prefect user only accesses the `prefect` database.
+  - Scheduler app user accesses `agent_scheduler.scheduler_app`.
+  - Pipeline app user writes `pipeline_data.pipeline_app` and `pipeline_data.public_data`.
+  - Trading private writer writes `pipeline_data.trading_private` and may read `pipeline_data.public_data`.
+  - Read-only analytics user may read `public_data` and selected `pipeline_app` tables, but not `trading_private`.
+- Add typed settings for `AGENT_SCHEDULER_DATABASE_URL`, `PIPELINE_DATABASE_URL`, and `TRADING_PRIVATE_DATABASE_URL`.
+- Keep custom pipeline datasets out of Prefect's internal database and out of scheduler app metadata tables.
+
+Acceptance:
+
+- `make services-up` initializes all required databases and schemas on a fresh Postgres volume.
+- Prefect continues to use only the `prefect` database.
+- Scheduler metadata has a distinct application database/schema.
+- Public external datasets and private trading datasets are separated in `pipeline_data` schemas.
+- Tests or smoke checks prove each configured user can access only its intended database/schema.
+
+Implementation notes:
+
+- Postgres bootstrap scripts live in `infra/postgres/init/`.
+- `make db-check-access` smoke-checks writes for `scheduler_app`, `public_data`, and `trading_private`.
+- Existing local Postgres volumes must be recreated intentionally before bootstrap scripts can create the new databases and schemas.
+
+## Phase 10: Example Public Dataset Pipeline
+
+Goal: prove the scheduler repo can also host deterministic custom pipelines without asking an agent prompt to invent schema or SQL at runtime.
+
+Example pipeline:
+
+```text
+CoinGecko /coins/list
+  -> fetch current coin ID map
+  -> validate id, symbol, name, platforms
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_coins
+  -> record run metadata in public_data.pipeline_ingest_runs
+
+CoinGecko /asset_platforms
+  -> fetch current asset platform ID map
+  -> validate id, chain_identifier, name, shortname, native_coin_id, image
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_asset_platforms
+  -> record run metadata in public_data.pipeline_ingest_runs
+
+CoinGecko /nfts/list
+  -> fetch paginated NFT collection ID map
+  -> validate id, contract_address, name, asset_platform_id, symbol
+  -> wait between paginated requests to avoid rate-limit pressure
+  -> create public_data tables when missing
+  -> upsert into public_data.coingecko_nft_collections
+  -> record run metadata in public_data.pipeline_ingest_runs
+```
+
+Scalable structure:
+
+```text
+src/agent_scheduler/pipelines/
+  common/           # shared DB and pipeline infrastructure
+  coingecko/
+    client.py       # source API client
+    models.py       # validated API/result models
+    repository.py   # target schema and persistence
+    coins_list.py   # ingestion orchestration
+    asset_platforms.py
+    nfts_list.py
+
+pipelines/coingecko/
+  ingest_coins.py
+  ingest_asset_platforms.py
+  ingest_nfts.py
+  README.md
+```
+
+Implementation tasks:
+
+- Keep custom pipelines out of the agent-facing `agent-scheduler` CLI surface.
+- Add reproducible scripts under `pipelines/coingecko/`.
+- Use `PIPELINE_DATABASE_URL`, not Prefect's database and not `AGENT_SCHEDULER_DATABASE_URL`.
+- Keep writes inside the `public_data` schema for public external datasets.
+- Make schema creation idempotent.
+- Add dry-run mode for fetch and validation without DB writes.
+- Add Make targets for dry-run and real ingestion.
+- Add weekly Prefect schedules for both CoinGecko datasets at Sunday `10:00:00` in `Asia/Singapore`.
+- Document developer pipeline usage in README and `pipelines/coingecko/README.md`.
+
+Acceptance:
+
+- Dry-run can validate a CoinGecko response without database writes.
+- Real ingestion creates or updates `public_data.coingecko_coins`.
+- Real ingestion creates or updates `public_data.coingecko_asset_platforms`.
+- Real ingestion creates or updates `public_data.coingecko_nft_collections`.
+- Ingestion writes an audit record to `public_data.pipeline_ingest_runs`.
+- Prefect deployments exist for `weekly-coingecko-coins-list`, `weekly-coingecko-asset-platforms`, and `weekly-coingecko-nfts-list` on cron `0 10 * * 0`.
+- NFT ingestion uses an inter-page delay and supports `max_pages` for safe validation.
+- Tests cover API client request construction, schema target names, and dry-run validation.
 
 ## Test Plan
 
@@ -230,6 +407,7 @@ Acceptance:
 - The first implementation is greenfield; the current repo only contains docs.
 - CodeGraph should not be initialized during the initial implementation unless requested later.
 - Local authorization is trusted: any local process that can run the CLI may schedule registered workflows.
-- No separate application database, API server, or web UI is included in v1.
+- No separate API server or web UI is included in v1.
+- Scheduler application metadata and custom pipeline datasets should be separated from Prefect orchestration state before adding persistent dataset ingestion.
 - Prefect Cloud is out of scope for v1; self-hosted Prefect with Postgres is the expected deployment.
 - Data/pipeline dependencies such as `pandas` or `polars` are added only when custom pipeline scripts require them; they are not base scheduler dependencies.
